@@ -3,119 +3,561 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>LEV YA 1.0 CLOUD</title>
+    <title>LEV YA 1.0 CLOUD — Облачный AI помощник</title>
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
         body {
-            font-family: 'Space Grotesk', sans-serif;
+            font-family: 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
             background: #0a0a0f;
             height: 100vh;
             overflow: hidden;
             color: #fff;
         }
+
         .glow-bg {
             position: fixed;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
-            background: radial-gradient(circle at 20% 50%, rgba(16,163,127,0.2) 0%, transparent 50%),
-                        radial-gradient(circle at 80% 80%, rgba(100,100,255,0.15) 0%, transparent 50%);
+            background: radial-gradient(circle at 20% 50%, rgba(16, 163, 127, 0.2) 0%, transparent 50%),
+                        radial-gradient(circle at 80% 80%, rgba(100, 100, 255, 0.15) 0%, transparent 50%);
             pointer-events: none;
             z-index: 0;
         }
-        .particles { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; }
+
+        .particles {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 0;
+        }
+
         .particle {
             position: absolute;
-            background: rgba(16,163,127,0.3);
+            background: rgba(16, 163, 127, 0.3);
             border-radius: 50%;
             animation: float 15s infinite ease-in-out;
         }
+
         @keyframes float {
-            0%,100% { transform: translateY(0) translateX(0); opacity: 0; }
+            0%, 100% { transform: translateY(0) translateX(0); opacity: 0; }
             10% { opacity: 0.5; }
             90% { opacity: 0.5; }
             100% { transform: translateY(-100px) translateX(50px); opacity: 0; }
         }
-        .app { display: flex; height: 100vh; position: relative; z-index: 1; }
+
+        .app {
+            display: flex;
+            height: 100vh;
+            position: relative;
+            z-index: 1;
+        }
+
         .sidebar {
             width: 280px;
-            background: rgba(15,15,20,0.95);
+            background: rgba(15, 15, 20, 0.95);
             backdrop-filter: blur(20px);
-            border-right: 1px solid rgba(255,255,255,0.05);
+            border-right: 1px solid rgba(255, 255, 255, 0.05);
             display: flex;
             flex-direction: column;
+            transition: transform 0.3s ease;
         }
-        .logo { padding: 24px 20px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid rgba(255,255,255,0.05); }
-        .logo-icon { width: 40px; height: 40px; border-radius: 12px; background: linear-gradient(135deg, #10a37f, #0d8a6a); display: flex; align-items: center; justify-content: center; overflow: hidden; }
-        .logo-icon img { width: 100%; height: 100%; object-fit: cover; }
-        .logo-text { font-size: 18px; font-weight: 700; }
-        .logo-text span { color: #10a37f; }
-        .logo-badge { background: rgba(16,163,127,0.2); border: 1px solid rgba(16,163,127,0.5); border-radius: 20px; padding: 2px 8px; font-size: 9px; color: #10a37f; margin-left: auto; }
-        .new-chat { margin: 16px; padding: 12px 16px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; color: #fff; cursor: pointer; display: flex; align-items: center; gap: 12px; }
-        .new-chat:hover { background: rgba(16,163,127,0.15); border-color: #10a37f; }
-        .history-header { padding: 12px 20px 8px; font-size: 11px; color: #666; letter-spacing: 1px; }
-        .history-list { flex: 1; overflow-y: auto; padding: 0 12px; }
-        .history-list::-webkit-scrollbar { width: 0px; }
-        .history-item { padding: 10px 12px; margin: 4px 0; border-radius: 10px; cursor: pointer; display: flex; align-items: center; gap: 12px; color: #aaa; font-size: 13px; }
-        .history-item:hover { background: rgba(255,255,255,0.05); color: #fff; }
-        .history-item.active { background: rgba(16,163,127,0.15); color: #10a37f; }
-        .sidebar-footer { padding: 16px 20px; border-top: 1px solid rgba(255,255,255,0.05); }
-        .model-status { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #888; }
-        .status-dot { width: 8px; height: 8px; background: #10a37f; border-radius: 50%; animation: pulse 2s infinite; }
-        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
-        .version { font-size: 10px; color: #444; }
-        .main { flex: 1; display: flex; flex-direction: column; background: rgba(10,10,15,0.8); overflow: hidden; }
-        .header { padding: 16px 28px; display: flex; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.05); }
-        .menu-toggle { display: none; background: none; border: none; color: #fff; font-size: 24px; cursor: pointer; }
-        .header-right { display: flex; gap: 16px; align-items: center; margin-left: auto; }
-        .model-selector { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 40px; padding: 8px 16px; display: flex; align-items: center; gap: 8px; cursor: pointer; }
-        .mode-selector { display: flex; gap: 4px; background: rgba(255,255,255,0.05); border-radius: 40px; padding: 4px; }
-        .mode-btn { background: none; border: none; padding: 6px 12px; border-radius: 32px; cursor: pointer; font-size: 14px; color: #aaa; }
-        .mode-btn.active { background: #10a37f; color: #fff; }
-        .messages { flex: 1; overflow-y: auto; padding: 20px 28px; }
-        .messages::-webkit-scrollbar { width: 0px; }
-        .welcome { text-align: center; padding: 60px 20px; }
-        .welcome-icon { font-size: 64px; margin-bottom: 24px; }
-        .welcome h1 { font-size: 32px; background: linear-gradient(135deg, #fff, #10a37f); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-        .welcome p { color: #888; margin-bottom: 32px; }
-        .suggestions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
-        .suggestions button { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 40px; padding: 10px 20px; color: #ddd; cursor: pointer; }
-        .suggestions button:hover { background: rgba(16,163,127,0.15); border-color: #10a37f; }
-        .message { display: flex; gap: 16px; margin-bottom: 24px; animation: fadeIn 0.3s ease; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        .message-avatar { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
-        .user .message-avatar { background: linear-gradient(135deg, #10a37f, #0d8a6a); }
-        .ai .message-avatar { background: #2a2a32; }
-        .message-content { flex: 1; line-height: 1.6; font-size: 15px; }
-        .typing { display: flex; gap: 6px; padding: 12px 0; }
-        .typing span { width: 8px; height: 8px; background: #666; border-radius: 50%; animation: blink 1.4s infinite; }
+
+        .logo {
+            padding: 24px 20px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .logo-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            background: linear-gradient(135deg, #10a37f, #0d8a6a);
+            box-shadow: 0 0 20px rgba(16, 163, 127, 0.3);
+        }
+
+        .logo-icon img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .logo-text {
+            font-size: 18px;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+        }
+
+        .logo-text span {
+            color: #10a37f;
+        }
+
+        .logo-badge {
+            background: rgba(16, 163, 127, 0.2);
+            border: 1px solid rgba(16, 163, 127, 0.5);
+            border-radius: 20px;
+            padding: 2px 8px;
+            font-size: 9px;
+            font-weight: 600;
+            color: #10a37f;
+            margin-left: auto;
+        }
+
+        .new-chat {
+            margin: 16px;
+            padding: 12px 16px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 14px;
+            color: #fff;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            transition: all 0.2s;
+        }
+
+        .new-chat:hover {
+            background: rgba(16, 163, 127, 0.15);
+            border-color: #10a37f;
+            transform: translateX(2px);
+        }
+
+        .history-header {
+            padding: 12px 20px 8px;
+            font-size: 11px;
+            font-weight: 600;
+            color: #666;
+            letter-spacing: 1px;
+        }
+
+        .history-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0 12px;
+        }
+
+        .history-list::-webkit-scrollbar {
+            width: 0px;
+            background: transparent;
+        }
+
+        .history-item {
+            padding: 10px 12px;
+            margin: 4px 0;
+            border-radius: 10px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            color: #aaa;
+            font-size: 13px;
+            transition: all 0.2s;
+        }
+
+        .history-item:hover {
+            background: rgba(255, 255, 255, 0.05);
+            color: #fff;
+        }
+
+        .history-item.active {
+            background: rgba(16, 163, 127, 0.15);
+            color: #10a37f;
+        }
+
+        .sidebar-footer {
+            padding: 16px 20px;
+            border-top: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .model-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: #888;
+            margin-bottom: 8px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            background: #10a37f;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .version {
+            font-size: 10px;
+            color: #444;
+        }
+
+        .main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: rgba(10, 10, 15, 0.8);
+            overflow: hidden;
+        }
+
+        .header {
+            padding: 16px 28px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .menu-toggle {
+            display: none;
+            background: none;
+            border: none;
+            color: #fff;
+            font-size: 24px;
+            cursor: pointer;
+        }
+
+        .header-right {
+            display: flex;
+            gap: 16px;
+            align-items: center;
+            margin-left: auto;
+        }
+
+        .model-selector {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 40px;
+            padding: 8px 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.2s;
+        }
+
+        .model-selector:hover {
+            border-color: #10a37f;
+            background: rgba(16, 163, 127, 0.1);
+        }
+
+        .mode-selector {
+            display: flex;
+            gap: 4px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 40px;
+            padding: 4px;
+        }
+
+        .mode-btn {
+            background: none;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 32px;
+            cursor: pointer;
+            font-size: 14px;
+            color: #aaa;
+            transition: all 0.2s;
+        }
+
+        .mode-btn.active {
+            background: #10a37f;
+            color: #fff;
+        }
+
+        .messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px 28px;
+        }
+
+        .messages::-webkit-scrollbar {
+            width: 0px;
+            background: transparent;
+        }
+
+        .welcome {
+            text-align: center;
+            padding: 60px 20px;
+        }
+
+        .welcome-icon {
+            font-size: 64px;
+            margin-bottom: 24px;
+        }
+
+        .welcome h1 {
+            font-size: 32px;
+            font-weight: 600;
+            margin-bottom: 12px;
+            background: linear-gradient(135deg, #fff, #10a37f);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .welcome p {
+            color: #888;
+            margin-bottom: 32px;
+        }
+
+        .suggestions {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .suggestions button {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 40px;
+            padding: 10px 20px;
+            color: #ddd;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .suggestions button:hover {
+            background: rgba(16, 163, 127, 0.15);
+            border-color: #10a37f;
+        }
+
+        .message {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 24px;
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .message-avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            flex-shrink: 0;
+        }
+
+        .user .message-avatar {
+            background: linear-gradient(135deg, #10a37f, #0d8a6a);
+        }
+
+        .ai .message-avatar {
+            background: #2a2a32;
+        }
+
+        .message-content {
+            flex: 1;
+            line-height: 1.6;
+            font-size: 15px;
+        }
+
+        .message-content pre {
+            background: #1a1a1f;
+            padding: 14px;
+            border-radius: 12px;
+            overflow-x: auto;
+            margin: 12px 0;
+        }
+
+        .typing {
+            display: flex;
+            gap: 6px;
+            padding: 12px 0;
+        }
+
+        .typing span {
+            width: 8px;
+            height: 8px;
+            background: #666;
+            border-radius: 50%;
+            animation: blink 1.4s infinite;
+        }
+
         .typing span:nth-child(2) { animation-delay: 0.2s; }
         .typing span:nth-child(3) { animation-delay: 0.4s; }
-        @keyframes blink { 0%,60%,100% { opacity: 0.3; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-4px); } }
-        .input-area { padding: 0 28px 28px; }
-        .input-wrapper { max-width: 800px; margin: 0 auto; background: #1e1e28; border: 1px solid #2a2a35; border-radius: 32px; display: flex; align-items: center; gap: 8px; padding-right: 8px; }
-        .input-wrapper:focus-within { border-color: #10a37f; box-shadow: 0 0 0 3px rgba(16,163,127,0.2); }
-        #input { flex: 1; background: transparent; border: none; padding: 16px 20px; color: #fff; font-size: 15px; outline: none; }
-        #input::placeholder { color: #666; }
-        .send-btn { width: 40px; height: 40px; background: #10a37f; border: none; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; }
-        .send-btn:hover { background: #0d8a6a; transform: scale(1.02); }
-        .send-btn svg { width: 20px; height: 20px; stroke: white; }
-        .status { text-align: center; padding: 16px; font-size: 12px; color: #666; }
-        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); backdrop-filter: blur(8px); z-index: 1000; justify-content: center; align-items: center; }
-        .modal-content { background: #1a1a1f; border-radius: 24px; width: 400px; max-width: 90%; border: 1px solid rgba(255,255,255,0.1); }
-        .modal-header { padding: 20px; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: space-between; }
-        .modal-header button { background: none; border: none; color: #aaa; cursor: pointer; font-size: 20px; }
-        .modal-body { padding: 16px; }
-        .model-item { padding: 14px; margin: 8px 0; border-radius: 12px; cursor: pointer; }
-        .model-item:hover { background: rgba(255,255,255,0.05); }
-        .model-item.active { background: rgba(16,163,127,0.15); border-left: 2px solid #10a37f; }
+
+        @keyframes blink {
+            0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+            30% { opacity: 1; transform: translateY(-4px); }
+        }
+
+        .input-area {
+            padding: 0 28px 28px;
+        }
+
+        .input-wrapper {
+            max-width: 800px;
+            margin: 0 auto;
+            background: #1e1e28;
+            border: 1px solid #2a2a35;
+            border-radius: 32px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.2s;
+            padding-right: 8px;
+        }
+
+        .input-wrapper:focus-within {
+            border-color: #10a37f;
+            box-shadow: 0 0 0 3px rgba(16, 163, 127, 0.2);
+        }
+
+        #input {
+            flex: 1;
+            background: transparent;
+            border: none;
+            padding: 16px 20px;
+            color: #fff;
+            font-size: 15px;
+            font-family: inherit;
+            outline: none;
+        }
+
+        #input::placeholder {
+            color: #666;
+        }
+
+        .send-btn {
+            width: 40px;
+            height: 40px;
+            background: #10a37f;
+            border: none;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+            flex-shrink: 0;
+        }
+
+        .send-btn:hover {
+            background: #0d8a6a;
+            transform: scale(1.02);
+        }
+
+        .send-btn svg {
+            width: 20px;
+            height: 20px;
+            stroke: white;
+        }
+
+        .status {
+            text-align: center;
+            padding: 16px;
+            font-size: 12px;
+            color: #666;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(8px);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal-content {
+            background: #1a1a1f;
+            border-radius: 24px;
+            width: 400px;
+            max-width: 90%;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .modal-header {
+            padding: 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            justify-content: space-between;
+            font-weight: 600;
+        }
+
+        .modal-header button {
+            background: none;
+            border: none;
+            color: #aaa;
+            cursor: pointer;
+            font-size: 20px;
+        }
+
+        .modal-body {
+            padding: 16px;
+        }
+
+        .model-item {
+            padding: 14px;
+            margin: 8px 0;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .model-item:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .model-item.active {
+            background: rgba(16, 163, 127, 0.15);
+            border-left: 2px solid #10a37f;
+        }
+
         @media (max-width: 768px) {
-            .sidebar { position: fixed; left: -280px; z-index: 100; height: 100%; }
-            .sidebar.open { left: 0; }
-            .menu-toggle { display: block; }
-            .header-right { margin-left: 0; }
+            .sidebar {
+                position: fixed;
+                left: -280px;
+                z-index: 100;
+                height: 100%;
+            }
+            .sidebar.open {
+                left: 0;
+            }
+            .menu-toggle {
+                display: block;
+            }
+            .header-right {
+                margin-left: 0;
+            }
         }
     </style>
 </head>
@@ -124,26 +566,44 @@
 <div class="particles" id="particles"></div>
 
 <div class="app">
+    <!-- Сайдбар -->
     <div class="sidebar" id="sidebar">
         <div class="logo">
-            <div class="logo-icon"><img src="https://img.freepik.com/premium-psd/letter-l-accentuated-by-neon-flashing-led-runways-with-thin-neon-color-y2k-shape-art-collection_1142283-77291.jpg?semt=ais_hybrid&w=740" alt="LEV YA"></div>
+            <div class="logo-icon" id="logoIcon">
+                <img src="https://img.freepik.com/premium-psd/letter-l-accentuated-by-neon-flashing-led-runways-with-thin-neon-color-y2k-shape-art-collection_1142283-77291.jpg?semt=ais_hybrid&w=740" 
+                     alt="LEV YA" 
+                     style="width:100%; height:100%; object-fit:cover; border-radius:12px;">
+            </div>
             <div class="logo-text">LEV <span>YA</span></div>
             <div class="logo-badge">1.0 CLOUD</div>
         </div>
-        <button class="new-chat" onclick="newChat()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg> Новый чат</button>
+        
+        <button class="new-chat" onclick="newChat()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+            Новый чат
+        </button>
+        
         <div class="history-header">ИСТОРИЯ</div>
         <div class="history-list" id="historyList"></div>
+        
         <div class="sidebar-footer">
-            <div class="model-status"><div class="status-dot"></div><span id="currentModelName">phi3:mini</span></div>
+            <div class="model-status">
+                <div class="status-dot"></div>
+                <span id="currentModelName">phi3:mini</span>
+            </div>
             <div class="version">LEV YA 1.0 | CLOUD</div>
         </div>
     </div>
 
+    <!-- Основная область -->
     <div class="main">
         <div class="header">
             <button class="menu-toggle" onclick="toggleSidebar()">☰</button>
             <div class="header-right">
-                <div class="model-selector" onclick="openModelModal()"><span id="modelSelectorText">phi3:mini</span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M6 9l6 6 6-6"/></svg></div>
+                <div class="model-selector" onclick="openModelModal()">
+                    <span id="modelSelectorText">phi3:mini</span>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M6 9l6 6 6-6"/></svg>
+                </div>
                 <div class="mode-selector" id="modeSelector">
                     <button class="mode-btn" data-mode="краткий">📝</button>
                     <button class="mode-btn" data-mode="подробный">📚</button>
@@ -153,6 +613,7 @@
             </div>
         </div>
 
+        <!-- Область сообщений -->
         <div class="messages" id="messages">
             <div class="welcome">
                 <div class="welcome-icon">✨</div>
@@ -167,27 +628,42 @@
             </div>
         </div>
 
+        <!-- Панель ввода -->
         <div class="input-area">
             <div class="input-wrapper">
                 <input type="text" id="input" placeholder="Напишите сообщение...">
-                <button class="send-btn" onclick="sendMessage()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M5 12H19M19 12L12 5M19 12L12 19" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+                <button class="send-btn" onclick="sendMessage()">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M5 12H19M19 12L12 5M19 12L12 19" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
             </div>
             <div class="status" id="status">✨ Готов к работе</div>
         </div>
     </div>
 </div>
 
+<!-- Модальное окно выбора модели -->
 <div class="modal" id="modelModal">
     <div class="modal-content">
-        <div class="modal-header"><span>Выбери модель</span><button onclick="closeModal()">✕</button></div>
+        <div class="modal-header">
+            <span>Выбери модель</span>
+            <button onclick="closeModal()">✕</button>
+        </div>
         <div class="modal-body" id="modelList"></div>
     </div>
 </div>
 
 <script>
-    // ========== ОБЛАЧНЫЙ API (С ПРОКСИ ДЛЯ CORS) ==========
-    const API_URL = "https://cors-anywhere.herokuapp.com/https://ollama.com/v1/chat/completions";
-    const API_KEY = "0ac009945f2b42c599ccd6f50f1796a4.Ro4JNs3ylhXvsJuC6C4U4_FJ";
+    // ========== ОБЛАЧНЫЙ API (СВОЙ СЕРВЕР НА RENDER) ==========
+    // ВАЖНО: Замени на свой API после деплоя на Render
+    const API_URL = "https://lev-ya-api.onrender.com/v1/chat/completions";
+    const API_KEY = "";
+    
+    // ========== РЕЗЕРВНЫЙ API ДЛЯ ТЕСТА ==========
+    // Если свой сервер не готов, раскомментируй строчку ниже и закомментируй верхнюю
+    // const API_URL = "https://api.sree.sg/v1/chat/completions";
+    // const API_KEY = "sree";
 
     const ALL_MODELS = [
         { name: "phi3:mini", size: "2.2 GB", desc: "Быстрая, для любых задач" },
@@ -195,7 +671,7 @@
         { name: "llama3.2:3b", size: "2.0 GB", desc: "Умная и быстрая" },
         { name: "qwen2.5:7b", size: "4.7 GB", desc: "Многоязычная" },
         { name: "deepseek-r1:7b", size: "4.7 GB", desc: "Аналитическая" },
-        { name: "gemma2:2b", size: "1.6 GB", desc: "Лёгкая" },
+        { name: "gemma2:2b", size: "1.6 GB", desc: "Лёгкая, экономичная" },
         { name: "tinyllama", size: "637 MB", desc: "Молниеносная" }
     ];
 
@@ -323,12 +799,16 @@
         showTyping();
 
         try {
+            const headers = {
+                'Content-Type': 'application/json'
+            };
+            if (API_KEY) {
+                headers['Authorization'] = `Bearer ${API_KEY}`;
+            }
+
             const response = await fetch(API_URL, {
                 method: 'POST',
-                headers: { 
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${API_KEY}`
-                },
+                headers: headers,
                 body: JSON.stringify({
                     model: currentModel,
                     messages: [{ role: "user", content: message }],
