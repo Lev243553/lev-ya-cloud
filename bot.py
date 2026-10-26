@@ -20,7 +20,7 @@ PRICE_STARS = 20
 
 @bot.message_handler(commands=['start'])
 def start(message):
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_height=2)
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add(types.KeyboardButton("✍️ Написать пост"), types.KeyboardButton("📝 Сделать описание"))
     markup.add(types.KeyboardButton("🎓 Написать сочинение"), types.KeyboardButton("📖 Написать историю"))
     markup.add(types.KeyboardButton("ℹ️ О боте"))
