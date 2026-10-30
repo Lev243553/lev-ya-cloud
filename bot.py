@@ -12,11 +12,12 @@ API_URL = "https://polza.ai/api/v1/media"
 CHANNEL_USERNAME = "@PlameChat"
 ADMIN_ID = 7031603236
 
-DB_PATH = "photo_bot.db"
+DB_PATH = "media_bot.db"
 bot = telebot.TeleBot(TOKEN, threaded=True)
 
-# Словарь с названиями моделей (для красивого вывода)
+# Словари с названиями и типами
 MODEL_NAMES = {
+    # Картинки
     "openai/gpt-image-1.5": "GPT Image 1.5",
     "openai/gpt-5-image": "GPT-5 Image",
     "google/gemini-2.5-flash-image": "Gemini 2.5 Flash",
@@ -28,12 +29,26 @@ MODEL_NAMES = {
     "qwen/image": "Qwen Image",
     "tongyi-mai/z-image": "Tongyi Z-Image",
     "yandex/yandex-art": "Yandex Art",
+    # Музыка
+    "google/lyria-3-pro-preview": "Lyria 3 Pro",
+    "suno/sounds": "Suno Sounds",
+    "google/lyria-3-clip-preview": "Lyria 3 Clip"
+}
+
+MODEL_TYPES = {
+    # Картинки
+    "openai/gpt-image-1.5": "image", "openai/gpt-5-image": "image", "google/gemini-2.5-flash-image": "image",
+    "google/gemini-3.1-flash-lite-image": "image", "google/gemini-nano-banana-2.1": "image", "black-forest-labs/flux.2-flex": "image",
+    "bytedance/seedream-4": "image", "bytedance/seedream-5-lite": "image", "qwen/image": "image", "tongyi-mai/z-image": "image",
+    "yandex/yandex-art": "image",
+    # Музыка
+    "google/lyria-3-pro-preview": "audio", "suno/sounds": "audio", "google/lyria-3-clip-preview": "audio"
 }
 
 user_data = {}
 
 # ==========================================
-# 1. БАЗА ДАННЫХ (СНАЧАЛА ОБЪЯВЛЕНИЯ)
+# 1. БАЗА ДАННЫХ
 # ==========================================
 def get_conn():
     return sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -42,29 +57,18 @@ def init_db():
     conn = get_conn()
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS users (
-        user_id INTEGER PRIMARY KEY,
-        username TEXT,
-        is_banned INTEGER DEFAULT 0,
-        total_generated INTEGER DEFAULT 0
+        user_id INTEGER PRIMARY KEY, username TEXT, is_banned INTEGER DEFAULT 0, total_generated INTEGER DEFAULT 0
     )''')
     c.execute('''CREATE TABLE IF NOT EXISTS prices (
-        model_id TEXT PRIMARY KEY,
-        price INTEGER
+        model_id TEXT PRIMARY KEY, price INTEGER
     )''')
     
-    # Заполняем начальные цены
     default_models = {
-        "openai/gpt-image-1.5": 20,
-        "openai/gpt-5-image": 25,
-        "google/gemini-2.5-flash-image": 15,
-        "google/gemini-3.1-flash-lite-image": 10,
-        "google/gemini-nano-banana-2.1": 10,
-        "black-forest-labs/flux.2-flex": 20,
-        "bytedance/seedream-4": 15,
-        "bytedance/seedream-5-lite": 10,
-        "qwen/image": 10,
-        "tongyi-mai/z-image": 10,
+        "openai/gpt-image-1.5": 20, "openai/gpt-5-image": 25, "google/gemini-2.5-flash-image": 15,
+        "google/gemini-3.1-flash-lite-image": 10, "google/gemini-nano-banana-2.1": 10, "black-forest-labs/flux.2-flex": 20,
+        "bytedance/seedream-4": 15, "bytedance/seedream-5-lite": 10, "qwen/image": 10, "tongyi-mai/z-image": 10,
         "yandex/yandex-art": 10,
+        "google/lyria-3-pro-preview": 25, "suno/sounds": 10, "google/lyria-3-clip-preview": 15
     }
     for model_id, price in default_models.items():
         c.execute("INSERT OR IGNORE INTO prices (model_id, price) VALUES (?, ?)", (model_id, price))
@@ -72,12 +76,8 @@ def init_db():
     conn.commit()
     conn.close()
 
-# Вызов инициализации (ТЕПЕРЬ ОН ПОСЛЕ ОБЪЯВЛЕНИЯ ФУНКЦИЙ)
 init_db()
 
-# ==========================================
-# 2. ФУНКЦИИ РАБОТЫ С БАЗОЙ
-# ==========================================
 def db_get_user(user_id):
     conn = get_conn()
     c = conn.cursor()
@@ -120,7 +120,7 @@ def db_update_price(model_id, price):
     conn.close()
 
 # ==========================================
-# 3. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# 2. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 # ==========================================
 def check_subscription(user_id):
     try:
@@ -131,14 +131,14 @@ def check_subscription(user_id):
 
 def get_main_menu(user_id):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    markup.add(types.KeyboardButton("🎨 Нарисовать картинку"))
+    markup.add(types.KeyboardButton("🖼 Картинки"), types.KeyboardButton("🎵 Музыка"))
     markup.add(types.KeyboardButton("ℹ️ О боте"))
     if user_id == ADMIN_ID:
         markup.add(types.KeyboardButton("🛡 Админ-панель"))
     return markup
 
 # ==========================================
-# 4. ОБРАБОТЧИКИ БОТА
+# 3. ОБРАБОТЧИКИ БОТА
 # ==========================================
 @bot.message_handler(commands=['start'])
 def start(message):
@@ -163,8 +163,8 @@ def start(message):
     bot.send_message(
         uid,
         f"👋 Привет, @{uname}!\n\n"
-        f"Я — **Нейро-Художник**. Нажми кнопку ниже, чтобы начать.\n\n"
-        f"Сгенерировано картинок: {u['total_generated']}",
+        f"Я — **Нейро-Студия**. Могу нарисовать картинку или создать музыку.\n\n"
+        f"Сгенерировано: {u['total_generated']}",
         reply_markup=get_main_menu(uid),
         parse_mode="Markdown"
     )
@@ -181,24 +181,30 @@ def check_sub_callback(call):
 
 @bot.message_handler(func=lambda message: message.text == "ℹ️ О боте")
 def about_bot(message):
-    bot.send_message(message.chat.id, "Бот генерирует картинки через Polza.ai. Выбери модель и напиши запрос.")
+    bot.send_message(message.chat.id, "Бот генерирует картинки и музыку через Polza.ai. Выбери категорию и напиши запрос.")
 
-@bot.message_handler(func=lambda message: message.text == "🎨 Нарисовать картинку")
-def choose_model(message):
+# --- ВЫБОР КАТЕГОРИИ ---
+@bot.message_handler(func=lambda message: message.text in ["🖼 Картинки", "🎵 Музыка"])
+def choose_category(message):
     uid = message.from_user.id
     u = db_get_user(uid)
     if u and u["is_banned"]: return
     if not check_subscription(uid): return start(message)
 
+    category = "image" if message.text == "🖼 Картинки" else "audio"
     prices = db_get_prices()
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    for model_id in MODEL_NAMES:
-        price = prices.get(model_id, 10)
-        btn_text = f"{MODEL_NAMES[model_id]} ({price}⭐)"
-        markup.add(types.InlineKeyboardButton(btn_text, callback_data=f"model_{model_id}"))
     
-    bot.send_message(message.chat.id, "Выбери нейросеть для генерации:", reply_markup=markup)
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    for model_id, m_type in MODEL_TYPES.items():
+        if m_type == category:
+            price = prices.get(model_id, 10)
+            btn_text = f"{MODEL_NAMES[model_id]} ({price}⭐)"
+            markup.add(types.InlineKeyboardButton(btn_text, callback_data=f"model_{model_id}"))
+    
+    title = "Выбери модель для картинок:" if category == "image" else "Выбери модель для музыки:"
+    bot.send_message(message.chat.id, title, reply_markup=markup)
 
+# --- ВЫБОР МОДЕЛИ ---
 @bot.callback_query_handler(func=lambda call: call.data.startswith("model_"))
 def ask_prompt(call):
     bot.answer_callback_query(call.id)
@@ -213,15 +219,17 @@ def ask_prompt(call):
     
     user_data[uid] = {"model": model_id, "price": price}
     
-    msg = bot.send_message(uid, f"Выбрана модель: **{MODEL_NAMES[model_id]}** ({price}⭐).\n\nНапиши, что нарисовать:")
+    action = "нарисовать" if MODEL_TYPES[model_id] == "image" else "создать"
+    msg = bot.send_message(uid, f"Выбрана модель: **{MODEL_NAMES[model_id]}** ({price}⭐).\n\nНапиши, что {action}:", parse_mode="Markdown")
     bot.register_next_step_handler(msg, process_prompt)
 
+# --- ОБРАБОТКА ПРОМПТА ---
 def process_prompt(message):
     uid = message.from_user.id
     prompt = message.text
     
     if len(prompt) < 3:
-        return bot.send_message(uid, "❌ Опиши картинку подробнее.")
+        return bot.send_message(uid, "❌ Опиши подробнее.")
 
     data = user_data.get(uid)
     if not data:
@@ -233,23 +241,24 @@ def process_prompt(message):
 
     # БЕСПЛАТНО ДЛЯ АДМИНА
     if uid == ADMIN_ID:
-        bot.send_message(uid, "👑 Режим админа: генерация бесплатна!")
-        generate_image(uid, prompt, model_id)
+        bot.send_message(uid, "👑 Режим админа: бесплатно!")
+        generate_media(uid, prompt, model_id)
         return
 
-    # ОПЛАТА ДЛЯ ПОЛЬЗОВАТЕЛЕЙ
+    # ОПЛАТА
     markup = types.InlineKeyboardMarkup()
     pay_btn = types.InlineKeyboardButton(f"⭐ Оплатить {price} Stars", pay=True)
     markup.add(pay_btn)
 
+    media_type = "картинку" if MODEL_TYPES[model_id] == "image" else "музыку"
     bot.send_invoice(
         chat_id=uid,
         title=f"Генерация: {MODEL_NAMES[model_id]}",
-        description=f"Картинка: {prompt[:50]}...",
+        description=f"Создать {media_type}: {prompt[:50]}...",
         invoice_payload="gen_payment", 
         provider_token="", 
         currency="XTR",
-        prices=[types.LabeledPrice(label="Картинка", amount=price)],
+        prices=[types.LabeledPrice(label="Генерация", amount=price)],
         reply_markup=markup
     )
 
@@ -268,29 +277,28 @@ def got_payment(message):
     prompt = data["prompt"]
     model_id = data["model"]
     
-    bot.send_message(uid, f"✅ Оплата получена! Рисую через **{MODEL_NAMES[model_id]}**...", parse_mode="Markdown")
-    generate_image(uid, prompt, model_id)
+    bot.send_message(uid, f"✅ Оплата получена! Создаю через **{MODEL_NAMES[model_id]}**...", parse_mode="Markdown")
+    generate_media(uid, prompt, model_id)
 
 # ==========================================
-# 5. ГЕНЕРАЦИЯ КАРТИНКИ
+# 4. ГЕНЕРАЦИЯ (Скачивание и отправка файла)
 # ==========================================
-def generate_image(uid, prompt, model_id):
-    bot.send_chat_action(uid, 'upload_photo')
+def generate_media(uid, prompt, model_id):
+    media_type = MODEL_TYPES[model_id]
+    action = 'upload_photo' if media_type == 'image' else 'upload_voice'
+    
+    bot.send_chat_action(uid, action)
     
     try:
         headers = {
             "Authorization": f"Bearer {POLZA_API_KEY}",
             "Content-Type": "application/json"
         }
-        payload = {
-            "model": model_id,
-            "input": {
-                "prompt": prompt,
-                "aspect_ratio": "1:1",
-                "image_resolution": "1K"
-            },
-            "async": False 
-        }
+        
+        if media_type == "image":
+            payload = {"model": model_id, "input": {"prompt": prompt, "aspect_ratio": "1:1", "image_resolution": "1K"}, "async": False}
+        else:
+            payload = {"model": model_id, "input": {"prompt": prompt}, "async": False}
         
         response = requests.post(API_URL, headers=headers, json=payload, timeout=130)
         res_data = response.json()
@@ -302,6 +310,7 @@ def generate_image(uid, prompt, model_id):
         media_id = res_data.get("id")
         status = res_data.get("status")
         
+        # Ждем завершения, если статус pending
         if status == "pending" and media_id:
             for _ in range(40):
                 time.sleep(3)
@@ -315,17 +324,41 @@ def generate_image(uid, prompt, model_id):
             else:
                 return bot.send_message(uid, "⏳ Время ожидания истекло.")
 
-        image_url = None
+        # Ищем ссылку в ответе
+        media_url = None
         if "data" in res_data and isinstance(res_data["data"], list) and len(res_data["data"]) > 0:
-            image_url = res_data["data"][0].get("url")
+            media_url = res_data["data"][0].get("url")
         elif "url" in res_data:
-            image_url = res_data["url"]
+            media_url = res_data["url"]
             
-        if not image_url:
-            return bot.send_message(uid, f"❌ Ошибка: URL картинки не найден.")
+        if not media_url:
+            return bot.send_message(uid, f"❌ Ошибка: API вернул некорректный URL. Ответ: {res_data}")
 
-        bot.send_photo(uid, image_url, caption=f"🎨 {MODEL_NAMES[model_id]}\nЗапрос: {prompt}")
+        # --- СКАЧИВАЕМ ФАЙЛ НА СЕРВЕР ---
+        bot.send_message(uid, "⏳ Скачиваю готовый файл...")
+        file_resp = requests.get(media_url, timeout=60)
         
+        if file_resp.status_code != 200:
+            return bot.send_message(uid, "❌ Не удалось скачать файл с сервера генерации.")
+
+        # Сохраняем во временный файл
+        file_ext = ".jpg" if media_type == "image" else ".mp3"
+        temp_filename = f"temp_{uid}{file_ext}"
+        
+        with open(temp_filename, "wb") as f:
+            f.write(file_resp.content)
+
+        # --- ОТПРАВЛЯЕМ ФАЙЛ В TELEGRAM ---
+        with open(temp_filename, "rb") as f:
+            if media_type == "image":
+                bot.send_photo(uid, f, caption=f"🎨 {MODEL_NAMES[model_id]}\nЗапрос: {prompt}")
+            else:
+                bot.send_audio(uid, f, caption=f"🎵 {MODEL_NAMES[model_id]}\nЗапрос: {prompt}")
+        
+        # Удаляем временный файл
+        os.remove(temp_filename)
+        
+        # Обновляем статистику
         u = db_get_user(uid)
         if u:
             db_update_user(uid, total_generated=u["total_generated"] + 1)
@@ -337,7 +370,7 @@ def generate_image(uid, prompt, model_id):
         bot.send_message(uid, f"❌ Произошла ошибка: {e}")
 
 # ==========================================
-# 6. АДМИН-ПАНЕЛЬ
+# 5. АДМИН-ПАНЕЛЬ
 # ==========================================
 @bot.message_handler(func=lambda message: message.text == "🛡 Админ-панель")
 def admin_panel(message):
@@ -367,7 +400,7 @@ def admin_actions(call):
         c.execute("SELECT SUM(total_generated) FROM users")
         total_images = c.fetchone()[0] or 0
         conn.close()
-        bot.send_message(call.message.chat.id, f"📊 <b>Статистика:</b>\n\n👥 Пользователей: {total_users}\n🎨 Сгенерировано картинок: {total_images}", parse_mode="HTML")
+        bot.send_message(call.message.chat.id, f"📊 <b>Статистика:</b>\n\n👥 Пользователей: {total_users}\n🎨/🎵 Сгенерировано: {total_images}", parse_mode="HTML")
 
     elif act == "broadcast":
         msg = bot.send_message(call.message.chat.id, "Введи текст для рассылки всем пользователям:")
@@ -450,5 +483,5 @@ def admin_ban_user(message):
 # ЗАПУСК
 # ==========================================
 if __name__ == "__main__":
-    print("🚀 Фотобот с админкой запущен.")
+    print("🚀 Нейро-Студия запущена.")
     bot.infinity_polling(timeout=10, long_polling_timeout=5)
