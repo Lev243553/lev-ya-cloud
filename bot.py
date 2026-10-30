@@ -121,7 +121,7 @@ def handle_photo(message):
         # Отправляем ответ
         if len(answer) > 4000:
             for i in range(0, len(answer), 4000):
-                bot.send_message(message.chat.id, answer[i:i+4000], parse_mode="Markdown")
+                bot.send_message(message.chat.id, answer)
         else:
             bot.send_message(message.chat.id, answer, parse_mode="Markdown")
             
