@@ -7,10 +7,11 @@ import base64
 
 load_dotenv()
 
+# ВСТАВЬ СВОЙ ТОКЕН СЮДА
 TOKEN = "8959456335:AAFmQZmvsWuma4U0TZhIpBQJ8Kd2VOHwRN8"
-API_KEY = "sk_66e27f139221a866f91c53377ab0c1ce8c16f6dcabb3b654" # Позже замени на os.getenv("PROVOD_API_KEY")
+API_KEY = "sk_66e27f139221a866f91c53377ab0c1ce8c16f6dcabb3b654"
 API_URL = "https://api.provod.ai/v1/chat/completions"
-MODEL_NAME = "gpt-4o-mini" # Эта модель умеет читать фото и текст
+MODEL_NAME = "gpt-4o-mini" 
 
 bot = telebot.TeleBot(TOKEN, threaded=True)
 
@@ -27,17 +28,16 @@ def get_main_menu():
 def start(message):
     bot.send_message(
         message.chat.id,
-        "👋 Привет! Я твой **Мини-ГДЗ**.\n\n"
+        "👋 Привет! Я твой Мини-ГДЗ.\n\n"
         "Я умею решать задачи, писать конспекты, собирать структуру презентаций. "
-        "А еще я могу **читать задания с фото**!\n\n"
+        "А еще я могу читать задания с фото!\n\n"
         "Выбери действие в меню или просто отправь мне фото с домашкой 👇",
-        reply_markup=get_main_menu(),
-        parse_mode="Markdown"
+        reply_markup=get_main_menu()
     )
 
 @bot.message_handler(func=lambda message: message.text == "ℹ️ О боте")
 def about(message):
-    bot.send_message(message.chat.id, "Я работаю на базе нейросети GPT-4o-mini через API Provod. Помогаю с учёбой.")
+    bot.send_message(message.chat.id, "Я работаю на базе нейросети. Помогаю с учёбой.")
 
 @bot.message_handler(func=lambda message: message.text in [
     "📝 Решить задачу", "📖 Написать конспект", "📊 Сделать презентацию", "❓ Задать любой вопрос"
@@ -51,7 +51,7 @@ def choose_action(message):
         "❓ Задать любой вопрос": "Ответь на этот вопрос кратко и понятно: "
     }
     prompt_prefix = prompts.get(action, "")
-    msg = bot.send_message(message.chat.id, f"Отлично! Напиши тему или сам вопрос:")
+    msg = bot.send_message(message.chat.id, f"Отлично! Напиши тему или сам вопрос для «{action}»:")
     bot.register_next_step_handler(msg, generate_text_response, prompt_prefix)
 
 # --- ОБРАБОТКА ТЕКСТА ---
@@ -75,11 +75,12 @@ def generate_text_response(message, prompt_prefix):
         else:
             answer = f"Ошибка API: {data}"
 
+        # Отправляем БЕЗ Markdown, чтобы не было ошибок парсинга
         if len(answer) > 4000:
             for i in range(0, len(answer), 4000):
-                bot.send_message(message.chat.id, answer[i:i+4000], parse_mode="Markdown")
+                bot.send_message(message.chat.id, answer[i:i+4000])
         else:
-            bot.send_message(message.chat.id, answer, parse_mode="Markdown")
+            bot.send_message(message.chat.id, answer)
             
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ Ошибка: {e}")
@@ -118,16 +119,16 @@ def handle_photo(message):
         else:
             answer = f"Ошибка API: {data}"
 
-        # Отправляем ответ
+        # Отправляем БЕЗ Markdown
         if len(answer) > 4000:
             for i in range(0, len(answer), 4000):
-                bot.send_message(message.chat.id, answer)
+                bot.send_message(message.chat.id, answer[i:i+4000])
         else:
-            bot.send_message(message.chat.id, answer, parse_mode="Markdown")
+            bot.send_message(message.chat.id, answer)
             
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ Ошибка при обработке фото: {e}")
 
 if __name__ == "__main__":
-    print("🚀 Мини-ГДЗ (с фото) запущен.")
+    print("🚀 Мини-ГДЗ запущен.")
     bot.infinity_polling(timeout=10, long_polling_timeout=5)
