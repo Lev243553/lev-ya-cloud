@@ -11,7 +11,7 @@ load_dotenv()
 TOKEN = "8959456335:AAFmQZmvsWuma4U0TZhIpBQJ8Kd2VOHwRN8"
 API_KEY = "sk_66e27f139221a866f91c53377ab0c1ce8c16f6dcabb3b654"
 API_URL = "https://api.provod.ai/v1/chat/completions"
-MODEL_NAME = "gpt-4o-mini" 
+MODEL_NAME = "mimo-v2.5" 
 
 bot = telebot.TeleBot(TOKEN, threaded=True)
 
