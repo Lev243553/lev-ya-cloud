@@ -5,21 +5,41 @@ import time
 import os
 import sqlite3
 
-# Токен бота
+# --- НАСТРОЙКИ ---
 TOKEN = "8959456335:AAFmQZmvsWuma4U0TZhIpBQJ8Kd2VOHwRN8" 
-# Ключ Polza
 POLZA_API_KEY = "pza_qGQO8ZXtNks1OxNxKOGjd-Y01K9i-E0g"
-
 API_URL = "https://polza.ai/api/v1/media"
 CHANNEL_USERNAME = "@PlameChat"
-ADMIN_ID = 7031603236 # Твой ID
+ADMIN_ID = 7031603236
 
-bot = telebot.TeleBot(TOKEN, threaded=True)
 DB_PATH = "photo_bot.db"
+bot = telebot.TeleBot(TOKEN, threaded=True)
 
-# --- БАЗА ДАННЫХ ---
+# Словарь с названиями моделей (для красивого вывода)
+MODEL_NAMES = {
+    "openai/gpt-image-1.5": "GPT Image 1.5",
+    "openai/gpt-5-image": "GPT-5 Image",
+    "google/gemini-2.5-flash-image": "Gemini 2.5 Flash",
+    "google/gemini-3.1-flash-lite-image": "Gemini 3.1 Lite",
+    "google/gemini-nano-banana-2.1": "Nano Banana 2.1",
+    "black-forest-labs/flux.2-flex": "Flux 2 Flex",
+    "bytedance/seedream-4": "Seedream 4",
+    "bytedance/seedream-5-lite": "Seedream 5 Lite",
+    "qwen/image": "Qwen Image",
+    "tongyi-mai/z-image": "Tongyi Z-Image",
+    "yandex/yandex-art": "Yandex Art",
+}
+
+user_data = {}
+
+# ==========================================
+# 1. БАЗА ДАННЫХ (СНАЧАЛА ОБЪЯВЛЕНИЯ)
+# ==========================================
+def get_conn():
+    return sqlite3.connect(DB_PATH, check_same_thread=False)
+
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_conn()
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS users (
         user_id INTEGER PRIMARY KEY,
@@ -27,17 +47,12 @@ def init_db():
         is_banned INTEGER DEFAULT 0,
         total_generated INTEGER DEFAULT 0
     )''')
-    # Таблица для хранения цен (чтобы админ мог менять их на лету)
     c.execute('''CREATE TABLE IF NOT EXISTS prices (
         model_id TEXT PRIMARY KEY,
         price INTEGER
     )''')
-    conn.commit()
-    conn.close()
-
-    # Заполняем начальные цены, если их нет
-    conn = get_conn()
-    c = conn.cursor()
+    
+    # Заполняем начальные цены
     default_models = {
         "openai/gpt-image-1.5": 20,
         "openai/gpt-5-image": 25,
@@ -53,14 +68,16 @@ def init_db():
     }
     for model_id, price in default_models.items():
         c.execute("INSERT OR IGNORE INTO prices (model_id, price) VALUES (?, ?)", (model_id, price))
+        
     conn.commit()
     conn.close()
 
+# Вызов инициализации (ТЕПЕРЬ ОН ПОСЛЕ ОБЪЯВЛЕНИЯ ФУНКЦИЙ)
 init_db()
 
-def get_conn():
-    return sqlite3.connect(DB_PATH, check_same_thread=False)
-
+# ==========================================
+# 2. ФУНКЦИИ РАБОТЫ С БАЗОЙ
+# ==========================================
 def db_get_user(user_id):
     conn = get_conn()
     c = conn.cursor()
@@ -102,24 +119,9 @@ def db_update_price(model_id, price):
     conn.commit()
     conn.close()
 
-# --- ДАННЫЕ МОДЕЛЕЙ (НАЗВАНИЯ) ---
-MODEL_NAMES = {
-    "openai/gpt-image-1.5": "GPT Image 1.5",
-    "openai/gpt-5-image": "GPT-5 Image",
-    "google/gemini-2.5-flash-image": "Gemini 2.5 Flash",
-    "google/gemini-3.1-flash-lite-image": "Gemini 3.1 Lite",
-    "google/gemini-nano-banana-2.1": "Nano Banana 2.1",
-    "black-forest-labs/flux.2-flex": "Flux 2 Flex",
-    "bytedance/seedream-4": "Seedream 4",
-    "bytedance/seedream-5-lite": "Seedream 5 Lite",
-    "qwen/image": "Qwen Image",
-    "tongyi-mai/z-image": "Tongyi Z-Image",
-    "yandex/yandex-art": "Yandex Art",
-}
-
-user_data = {}
-
-# --- ПРОВЕРКА ПОДПИСКИ ---
+# ==========================================
+# 3. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# ==========================================
 def check_subscription(user_id):
     try:
         member = bot.get_chat_member(CHANNEL_USERNAME, user_id)
@@ -135,12 +137,14 @@ def get_main_menu(user_id):
         markup.add(types.KeyboardButton("🛡 Админ-панель"))
     return markup
 
+# ==========================================
+# 4. ОБРАБОТЧИКИ БОТА
+# ==========================================
 @bot.message_handler(commands=['start'])
 def start(message):
     uid = message.from_user.id
     uname = message.from_user.username or f"id{uid}"
     
-    # Регистрируем пользователя
     if not db_get_user(uid):
         db_add_user(uid, uname)
 
@@ -179,7 +183,6 @@ def check_sub_callback(call):
 def about_bot(message):
     bot.send_message(message.chat.id, "Бот генерирует картинки через Polza.ai. Выбери модель и напиши запрос.")
 
-# --- ВЫБОР МОДЕЛИ ---
 @bot.message_handler(func=lambda message: message.text == "🎨 Нарисовать картинку")
 def choose_model(message):
     uid = message.from_user.id
@@ -228,14 +231,13 @@ def process_prompt(message):
     model_id = data["model"]
     price = data["price"]
 
-    # --- БЕСПЛАТНО ДЛЯ АДМИНА ---
+    # БЕСПЛАТНО ДЛЯ АДМИНА
     if uid == ADMIN_ID:
         bot.send_message(uid, "👑 Режим админа: генерация бесплатна!")
-        bot.send_chat_action(uid, 'upload_photo')
         generate_image(uid, prompt, model_id)
         return
 
-    # --- ДЛЯ ОБЫЧНЫХ ПОЛЬЗОВАТЕЛЕЙ ---
+    # ОПЛАТА ДЛЯ ПОЛЬЗОВАТЕЛЕЙ
     markup = types.InlineKeyboardMarkup()
     pay_btn = types.InlineKeyboardButton(f"⭐ Оплатить {price} Stars", pay=True)
     markup.add(pay_btn)
@@ -269,7 +271,9 @@ def got_payment(message):
     bot.send_message(uid, f"✅ Оплата получена! Рисую через **{MODEL_NAMES[model_id]}**...", parse_mode="Markdown")
     generate_image(uid, prompt, model_id)
 
-# --- ФУНКЦИЯ ГЕНЕРАЦИИ ---
+# ==========================================
+# 5. ГЕНЕРАЦИЯ КАРТИНКИ
+# ==========================================
 def generate_image(uid, prompt, model_id):
     bot.send_chat_action(uid, 'upload_photo')
     
@@ -322,7 +326,6 @@ def generate_image(uid, prompt, model_id):
 
         bot.send_photo(uid, image_url, caption=f"🎨 {MODEL_NAMES[model_id]}\nЗапрос: {prompt}")
         
-        # Обновляем статистику
         u = db_get_user(uid)
         if u:
             db_update_user(uid, total_generated=u["total_generated"] + 1)
@@ -333,7 +336,9 @@ def generate_image(uid, prompt, model_id):
     except Exception as e:
         bot.send_message(uid, f"❌ Произошла ошибка: {e}")
 
-# --- АДМИН-ПАНЕЛЬ ---
+# ==========================================
+# 6. АДМИН-ПАНЕЛЬ
+# ==========================================
 @bot.message_handler(func=lambda message: message.text == "🛡 Админ-панель")
 def admin_panel(message):
     if message.from_user.id != ADMIN_ID: return
@@ -441,6 +446,9 @@ def admin_ban_user(message):
     status_text = "забанен" if new_status else "разбанен"
     bot.send_message(message.chat.id, f"✅ Пользователь @{uname} {status_text}.")
 
+# ==========================================
+# ЗАПУСК
+# ==========================================
 if __name__ == "__main__":
     print("🚀 Фотобот с админкой запущен.")
     bot.infinity_polling(timeout=10, long_polling_timeout=5)
