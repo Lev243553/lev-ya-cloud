@@ -3,87 +3,67 @@ from telebot import types
 import os
 from dotenv import load_dotenv
 import requests
+import base64
 
 load_dotenv()
 
-TOKEN = os.getenv("CONTENT_BOT_TOKEN")
-API_KEY = os.getenv("KOSAREVA_API_KEY")
-ADMIN_ID = int(os.getenv("ADMIN_ID", "7031603236"))
-
-# Базовый URL твоего API
-API_URL = "https://api.kosareva.cloud/v1/chat/completions"
-# Модель (если не работает, попробуй gpt-4o-mini)
-MODEL_NAME = "gpt-3.5-turbo" 
+TOKEN = "8959456335:AAFmQZmvsWuma4U0TZhIpBQJ8Kd2VOHwRN8"
+API_KEY = "sk_66e27f139221a866f91c53377ab0c1ce8c16f6dcabb3b654" # Позже замени на os.getenv("PROVOD_API_KEY")
+API_URL = "https://api.provod.ai/v1/chat/completions"
+MODEL_NAME = "gpt-4o-mini" # Эта модель умеет читать фото и текст
 
 bot = telebot.TeleBot(TOKEN, threaded=True)
-PRICE_STARS = 20 
+
+def get_main_menu():
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+    markup.add(types.KeyboardButton("📝 Решить задачу"))
+    markup.add(types.KeyboardButton("📖 Написать конспект"))
+    markup.add(types.KeyboardButton("📊 Сделать презентацию"))
+    markup.add(types.KeyboardButton("❓ Задать любой вопрос"))
+    markup.add(types.KeyboardButton("ℹ️ О боте"))
+    return markup
 
 @bot.message_handler(commands=['start'])
 def start(message):
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add(types.KeyboardButton("✍️ Написать пост"), types.KeyboardButton("📝 Сделать описание"))
-    markup.add(types.KeyboardButton("🎓 Написать сочинение"), types.KeyboardButton("📖 Написать историю"))
-    markup.add(types.KeyboardButton("ℹ️ О боте"))
-    
     bot.send_message(
-        message.chat.id, 
-        f"👋 Привет! Я — твой личный копирайтер.\n\n"
-        f"Выбери, что нужно написать. Я сгенерирую текст за пару секунд.\n\n"
-        f"💰 Стоимость одной генерации: <b>{PRICE_STARS} Stars</b>.",
-        reply_markup=markup,
-        parse_mode="HTML"
+        message.chat.id,
+        "👋 Привет! Я твой **Мини-ГДЗ**.\n\n"
+        "Я умею решать задачи, писать конспекты, собирать структуру презентаций. "
+        "А еще я могу **читать задания с фото**!\n\n"
+        "Выбери действие в меню или просто отправь мне фото с домашкой 👇",
+        reply_markup=get_main_menu(),
+        parse_mode="Markdown"
     )
 
 @bot.message_handler(func=lambda message: message.text == "ℹ️ О боте")
 def about(message):
-    bot.send_message(message.chat.id, "Я генерирую тексты с помощью нейросети. Каждый запрос стоит 20 Stars.")
+    bot.send_message(message.chat.id, "Я работаю на базе нейросети GPT-4o-mini через API Provod. Помогаю с учёбой.")
 
-@bot.message_handler(func=lambda message: message.text in ["✍️ Написать пост", "📝 Сделать описание", "🎓 Написать сочинение", "📖 Написать историю"])
-def choose_service(message):
-    markup = types.InlineKeyboardMarkup()
-    btn = types.InlineKeyboardButton(f"⭐ Оплатить {PRICE_STARS} Stars", pay=True)
-    markup.add(btn)
-    
-    bot.send_invoice(
-        chat_id=message.chat.id,
-        title=f"Генерация: {message.text}",
-        description=f"Оплата за создание текста ({message.text})",
-        invoice_payload=f"pay_{message.text}", 
-        provider_token="", 
-        currency="XTR", 
-        prices=[types.LabeledPrice(label="Текст", amount=PRICE_STARS)],
-        reply_markup=markup
-    )
-
-@bot.pre_checkout_query_handler(func=lambda query: True)
-def checkout(pre_checkout_query):
-    bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
-
-@bot.message_handler(content_types=['successful_payment'])
-def got_payment(message):
-    service = message.successful_payment.invoice_payload.replace("pay_", "")
-    msg = bot.send_message(message.chat.id, f"✅ Оплата получена!\nТеперь напиши тему для «{service}»:")
-    bot.register_next_step_handler(msg, generate_text, service)
-
-def generate_text(message, service):
-    bot.send_chat_action(message.chat.id, 'typing')
-    
+@bot.message_handler(func=lambda message: message.text in [
+    "📝 Решить задачу", "📖 Написать конспект", "📊 Сделать презентацию", "❓ Задать любой вопрос"
+])
+def choose_action(message):
+    action = message.text
     prompts = {
-        "✍️ Написать пост": f"Напиши интересный пост для социальных сетей на тему: {message.text}. Используй эмодзи.",
-        "📝 Сделать описание": f"Напиши продающее описание для товара: {message.text}.",
-        "🎓 Написать сочинение": f"Напиши школьное сочинение на тему: {message.text}. Объем 200-300 слов.",
-        "📖 Написать историю": f"Напиши короткий рассказ на тему: {message.text}."
+        "📝 Решить задачу": "Ты — учитель. Реши эту задачу по шагам, объясняя каждое действие. Задача: ",
+        "📖 Написать конспект": "Ты — студент. Напиши краткий и понятный конспект по этой теме (выдели главное, используй списки). Тема: ",
+        "📊 Сделать презентацию": "Ты — дизайнер презентаций. Составь структуру презентации из 5-7 слайдов на эту тему. Для каждого слайда напиши заголовок и 3 тезиса. Тема: ",
+        "❓ Задать любой вопрос": "Ответь на этот вопрос кратко и понятно: "
     }
-    user_prompt = prompts.get(service, f"Выполни задачу: {service}. Тема: {message.text}")
+    prompt_prefix = prompts.get(action, "")
+    msg = bot.send_message(message.chat.id, f"Отлично! Напиши тему или сам вопрос:")
+    bot.register_next_step_handler(msg, generate_text_response, prompt_prefix)
 
-    headers = {
-        "Authorization": f"Bearer {API_KEY}",
-        "Content-Type": "application/json"
-    }
+# --- ОБРАБОТКА ТЕКСТА ---
+def generate_text_response(message, prompt_prefix):
+    bot.send_chat_action(message.chat.id, 'typing')
+    full_prompt = f"{prompt_prefix}{message.text}"
+    
+    headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
     payload = {
         "model": MODEL_NAME,
-        "messages": [{"role": "user", "content": user_prompt}],
-        "max_tokens": 1000
+        "messages": [{"role": "user", "content": full_prompt}],
+        "max_tokens": 1500
     }
     
     try:
@@ -97,16 +77,57 @@ def generate_text(message, service):
 
         if len(answer) > 4000:
             for i in range(0, len(answer), 4000):
-                bot.send_message(message.chat.id, answer[i:i+4000])
+                bot.send_message(message.chat.id, answer[i:i+4000], parse_mode="Markdown")
         else:
-            bot.send_message(message.chat.id, answer)
+            bot.send_message(message.chat.id, answer, parse_mode="Markdown")
             
-        bot.send_message(ADMIN_ID, f"💰 Продажа! @{message.from_user.username} купил {service}")
-        
     except Exception as e:
-        bot.send_message(message.chat.id, f"❌ Ошибка генерации: {e}")
-        bot.send_message(ADMIN_ID, f"⚠️ Ошибка API: {e}")
+        bot.send_message(message.chat.id, f"❌ Ошибка: {e}")
+
+# --- ОБРАБОТКА ФОТО (ДОМАШКА) ---
+@bot.message_handler(content_types=['photo'])
+def handle_photo(message):
+    bot.send_message(message.chat.id, "⏳ Читаю задание с фото, подожди...")
+    bot.send_chat_action(message.chat.id, 'typing')
+    
+    try:
+        # Скачиваем фото
+        file_info = bot.get_file(message.photo[-1].file_id)
+        downloaded_file = bot.download_file(file_info.file_path)
+        
+        # Переводим в base64
+        base64_image = base64.b64encode(downloaded_file).decode('utf-8')
+        
+        headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
+        payload = {
+            "model": MODEL_NAME,
+            "messages": [
+                {"role": "user", "content": [
+                    {"type": "text", "text": "Прочитай задание на фото и реши его по шагам, объясняя каждое действие."},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
+                ]}
+            ],
+            "max_tokens": 1500
+        }
+        
+        response = requests.post(API_URL, headers=headers, json=payload, timeout=40)
+        data = response.json()
+        
+        if 'choices' in data:
+            answer = data['choices'][0]['message']['content']
+        else:
+            answer = f"Ошибка API: {data}"
+
+        # Отправляем ответ
+        if len(answer) > 4000:
+            for i in range(0, len(answer), 4000):
+                bot.send_message(message.chat.id, answer[i:i+4000], parse_mode="Markdown")
+        else:
+            bot.send_message(message.chat.id, answer, parse_mode="Markdown")
+            
+    except Exception as e:
+        bot.send_message(message.chat.id, f"❌ Ошибка при обработке фото: {e}")
 
 if __name__ == "__main__":
-    print("🚀 Контент-бот запущен.")
+    print("🚀 Мини-ГДЗ (с фото) запущен.")
     bot.infinity_polling(timeout=10, long_polling_timeout=5)
