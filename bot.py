@@ -1,134 +1,147 @@
 import telebot
 from telebot import types
-import os
-from dotenv import load_dotenv
 import requests
-import base64
+import time
+import os
 
-load_dotenv()
+# Твой токен бота (лучше вынести в переменные Bothost)
+TOKEN = "8959456335:AAFmQZmvsWuma4U0TZhIpBQJ8Kd2VOHwRN8" 
+# Твой ключ Polza (лучше вынести в переменные Bothost)
+POLZA_API_KEY = "pza_qGQO8ZXtNks1OxNxKOGjd-Y01K9i-E0g"
 
-# ВСТАВЬ СВОЙ ТОКЕН СЮДА
-TOKEN = "8959456335:AAFmQZmvsWuma4U0TZhIpBQJ8Kd2VOHwRN8"
-API_KEY = "sk_66e27f139221a866f91c53377ab0c1ce8c16f6dcabb3b654"
-API_URL = "https://api.provod.ai/v1/chat/completions"
-MODEL_NAME = "minimax-m3.1-flash" 
+# ID модели Polza
+MODEL_NAME = "openai/gpt-5.4-image-2"
+API_URL = "https://polza.ai/api/v1/media"
 
 bot = telebot.TeleBot(TOKEN, threaded=True)
+PRICE_STARS = 10
 
-def get_main_menu():
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    markup.add(types.KeyboardButton("📝 Решить задачу"))
-    markup.add(types.KeyboardButton("📖 Написать конспект"))
-    markup.add(types.KeyboardButton("📊 Сделать презентацию"))
-    markup.add(types.KeyboardButton("❓ Задать любой вопрос"))
-    markup.add(types.KeyboardButton("ℹ️ О боте"))
-    return markup
+# Временное хранилище для промптов (в реальном проекте используй SQLite)
+# Сюда сохраняем текст запроса до оплаты, чтобы знать, что рисовать
+user_prompts = {}
 
 @bot.message_handler(commands=['start'])
 def start(message):
     bot.send_message(
         message.chat.id,
-        "👋 Привет! Я твой Мини-ГДЗ.\n\n"
-        "Я умею решать задачи, писать конспекты, собирать структуру презентаций. "
-        "А еще я могу читать задания с фото!\n\n"
-        "Выбери действие в меню или просто отправь мне фото с домашкой 👇",
-        reply_markup=get_main_menu()
+        f"👋 Привет! Я — **Нейро-Художник**.\n\n"
+        f"Я нарисую всё, что ты захочешь, с помощью модели GPT-5.4 Image 2.\n"
+        f"💰 Стоимость одной картинки: **{PRICE_STARS} Stars**.\n\n"
+        f"Просто напиши, что мне нарисовать 👇",
+        parse_mode="Markdown"
     )
 
-@bot.message_handler(func=lambda message: message.text == "ℹ️ О боте")
-def about(message):
-    bot.send_message(message.chat.id, "Я работаю на базе нейросети. Помогаю с учёбой.")
+# Ловим описание картинки
+@bot.message_handler(content_types=['text'])
+def ask_for_payment(message):
+    prompt = message.text
+    if len(prompt) < 3:
+        return bot.send_message(message.chat.id, "❌ Опиши картинку подробнее.")
 
-@bot.message_handler(func=lambda message: message.text in [
-    "📝 Решить задачу", "📖 Написать конспект", "📊 Сделать презентацию", "❓ Задать любой вопрос"
-])
-def choose_action(message):
-    action = message.text
-    prompts = {
-        "📝 Решить задачу": "Ты — учитель. Реши эту задачу по шагам, объясняя каждое действие. Задача: ",
-        "📖 Написать конспект": "Ты — студент. Напиши краткий и понятный конспект по этой теме (выдели главное, используй списки). Тема: ",
-        "📊 Сделать презентацию": "Ты — дизайнер презентаций. Составь структуру презентации из 5-7 слайдов на эту тему. Для каждого слайда напиши заголовок и 3 тезиса. Тема: ",
-        "❓ Задать любой вопрос": "Ответь на этот вопрос кратко и понятно: "
-    }
-    prompt_prefix = prompts.get(action, "")
-    msg = bot.send_message(message.chat.id, f"Отлично! Напиши тему или сам вопрос для «{action}»:")
-    bot.register_next_step_handler(msg, generate_text_response, prompt_prefix)
+    # Сохраняем промпт по ID пользователя
+    user_prompts[message.from_user.id] = prompt
 
-# --- ОБРАБОТКА ТЕКСТА ---
-def generate_text_response(message, prompt_prefix):
-    bot.send_chat_action(message.chat.id, 'typing')
-    full_prompt = f"{prompt_prefix}{message.text}"
+    # Выставляем счёт на 10 звёзд
+    markup = types.InlineKeyboardMarkup()
+    pay_btn = types.InlineKeyboardButton(f"⭐ Оплатить {PRICE_STARS} Stars", pay=True)
+    markup.add(pay_btn)
+
+    bot.send_invoice(
+        chat_id=message.chat.id,
+        title="Генерация картинки",
+        description=f"Картинка по запросу: {prompt[:50]}...",
+        invoice_payload="gen_payment", 
+        provider_token="", 
+        currency="XTR", # Код Telegram Stars
+        prices=[types.LabeledPrice(label="Картинка", amount=PRICE_STARS)],
+        reply_markup=markup
+    )
+
+# Подтверждаем готовность принять оплату
+@bot.pre_checkout_query_handler(func=lambda query: True)
+def checkout(pre_checkout_query):
+    bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
+
+# Ловим успешную оплату
+@bot.message_handler(content_types=['successful_payment'])
+def got_payment(message):
+    bot.send_message(message.chat.id, "✅ Оплата получена! Начинаю рисовать...")
     
-    headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
-    payload = {
-        "model": MODEL_NAME,
-        "messages": [{"role": "user", "content": full_prompt}],
-        "max_tokens": 1500
-    }
+    # Достаем сохраненный промпт
+    prompt = user_prompts.get(message.from_user.id, "красивый пейзаж")
     
-    try:
-        response = requests.post(API_URL, headers=headers, json=payload, timeout=30)
-        data = response.json()
-        
-        if 'choices' in data:
-            answer = data['choices'][0]['message']['content']
-        else:
-            answer = f"Ошибка API: {data}"
-
-        # Отправляем БЕЗ Markdown, чтобы не было ошибок парсинга
-        if len(answer) > 4000:
-            for i in range(0, len(answer), 4000):
-                bot.send_message(message.chat.id, answer[i:i+4000])
-        else:
-            bot.send_message(message.chat.id, answer)
-            
-    except Exception as e:
-        bot.send_message(message.chat.id, f"❌ Ошибка: {e}")
-
-# --- ОБРАБОТКА ФОТО (ДОМАШКА) ---
-@bot.message_handler(content_types=['photo'])
-def handle_photo(message):
-    bot.send_message(message.chat.id, "⏳ Читаю задание с фото, подожди...")
-    bot.send_chat_action(message.chat.id, 'typing')
+    bot.send_chat_action(message.chat.id, 'upload_photo')
     
     try:
-        # Скачиваем фото
-        file_info = bot.get_file(message.photo[-1].file_id)
-        downloaded_file = bot.download_file(file_info.file_path)
-        
-        # Переводим в base64
-        base64_image = base64.b64encode(downloaded_file).decode('utf-8')
-        
-        headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
+        # 1. Отправляем запрос на генерацию в Polza
+        headers = {
+            "Authorization": f"Bearer {POLZA_API_KEY}",
+            "Content-Type": "application/json"
+        }
         payload = {
             "model": MODEL_NAME,
-            "messages": [
-                {"role": "user", "content": [
-                    {"type": "text", "text": "Прочитай задание на фото и реши его по шагам, объясняя каждое действие."},
-                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
-                ]}
-            ],
-            "max_tokens": 1500
+            "input": {
+                "prompt": prompt,
+                "aspect_ratio": "1:1", # Квадратная картинка
+                "image_resolution": "1K" # Разрешение
+            },
+            "async": False # Ждем результат синхронно (до 120 сек)
         }
         
-        response = requests.post(API_URL, headers=headers, json=payload, timeout=40)
+        response = requests.post(API_URL, headers=headers, json=payload, timeout=130)
         data = response.json()
-        
-        if 'choices' in data:
-            answer = data['choices'][0]['message']['content']
-        else:
-            answer = f"Ошибка API: {data}"
 
-        # Отправляем БЕЗ Markdown
-        if len(answer) > 4000:
-            for i in range(0, len(answer), 4000):
-                bot.send_message(message.chat.id, answer[i:i+4000])
-        else:
-            bot.send_message(message.chat.id, answer)
+        # 2. Проверяем ответ
+        if response.status_code != 200:
+            error_msg = data.get('error', {}).get('message', str(data))
+            return bot.send_message(message.chat.id, f"❌ Ошибка API: {error_msg}")
+
+        # 3. Извлекаем URL картинки
+        # Polza возвращает объект со статусом pending, но для синхронного запроса
+        # результат должен быть сразу, либо нужно опрашивать статус.
+        # Если пришел статус pending, нужно подождать.
+        media_id = data.get("id")
+        status = data.get("status")
+        
+        # Если статус pending, опрашиваем результат (максимум 120 секунд)
+        if status == "pending" and media_id:
+            for _ in range(40): # 40 попыток * 3 сек = 120 сек
+                time.sleep(3)
+                check_resp = requests.get(f"{API_URL}/{media_id}", headers=headers, timeout=10)
+                check_data = check_resp.json()
+                if check_data.get("status") == "completed":
+                    data = check_data
+                    break
+                elif check_data.get("status") == "failed":
+                    return bot.send_message(message.chat.id, "❌ Генерация не удалась. Попробуй другой запрос.")
+            else:
+                return bot.send_message(message.chat.id, "⏳ Генерация заняла слишком много времени. Попробуй позже.")
+
+        # 4. Отправляем картинку
+        # В ответе Polza URL обычно лежит в data -> data -> url
+        # Структура может отличаться, поэтому ищем URL рекурсивно
+        image_url = None
+        if "data" in data and isinstance(data["data"], list) and len(data["data"]) > 0:
+            image_url = data["data"][0].get("url")
+        elif "url" in data:
+            image_url = data["url"]
             
+        if not image_url:
+            return bot.send_message(message.chat.id, f"❌ Не удалось найти URL картинки в ответе. Ответ: {data}")
+
+        bot.send_photo(
+            message.chat.id, 
+            image_url, 
+            caption=f"🎨 Твой запрос: {prompt}"
+        )
+        
+        # Очищаем сохраненный промпт
+        if message.from_user.id in user_prompts:
+            del user_prompts[message.from_user.id]
+
     except Exception as e:
-        bot.send_message(message.chat.id, f"❌ Ошибка при обработке фото: {e}")
+        bot.send_message(message.chat.id, f"❌ Произошла ошибка: {e}")
 
 if __name__ == "__main__":
-    print("🚀 Мини-ГДЗ запущен.")
+    print("🚀 Фотобот запущен.")
     bot.infinity_polling(timeout=10, long_polling_timeout=5)
