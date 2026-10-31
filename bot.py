@@ -11,13 +11,11 @@ POLZA_API_KEY = "pza_qGQO8ZXtNks1OxNxKOGjd-Y01K9i-E0g"
 API_URL = "https://polza.ai/api/v1/media"
 CHANNEL_USERNAME = "@PlameChat"
 ADMIN_ID = 7031603236
-
 DB_PATH = "media_bot.db"
+
 bot = telebot.TeleBot(TOKEN, threaded=True)
 
-# Словари с названиями и типами
 MODEL_NAMES = {
-    # Картинки
     "openai/gpt-image-1.5": "GPT Image 1.5",
     "openai/gpt-5-image": "GPT-5 Image",
     "google/gemini-2.5-flash-image": "Gemini 2.5 Flash",
@@ -29,19 +27,16 @@ MODEL_NAMES = {
     "qwen/image": "Qwen Image",
     "tongyi-mai/z-image": "Tongyi Z-Image",
     "yandex/yandex-art": "Yandex Art",
-    # Музыка
     "google/lyria-3-pro-preview": "Lyria 3 Pro",
     "suno/sounds": "Suno Sounds",
     "google/lyria-3-clip-preview": "Lyria 3 Clip"
 }
 
 MODEL_TYPES = {
-    # Картинки
     "openai/gpt-image-1.5": "image", "openai/gpt-5-image": "image", "google/gemini-2.5-flash-image": "image",
     "google/gemini-3.1-flash-lite-image": "image", "google/gemini-nano-banana-2.1": "image", "black-forest-labs/flux.2-flex": "image",
     "bytedance/seedream-4": "image", "bytedance/seedream-5-lite": "image", "qwen/image": "image", "tongyi-mai/z-image": "image",
     "yandex/yandex-art": "image",
-    # Музыка
     "google/lyria-3-pro-preview": "audio", "suno/sounds": "audio", "google/lyria-3-clip-preview": "audio"
 }
 
@@ -119,6 +114,14 @@ def db_update_price(model_id, price):
     conn.commit()
     conn.close()
 
+def db_get_all_users():
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT user_id, username, is_banned, total_generated FROM users")
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
 # ==========================================
 # 2. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 # ==========================================
@@ -183,7 +186,6 @@ def check_sub_callback(call):
 def about_bot(message):
     bot.send_message(message.chat.id, "Бот генерирует картинки и музыку через Polza.ai. Выбери категорию и напиши запрос.")
 
-# --- ВЫБОР КАТЕГОРИИ ---
 @bot.message_handler(func=lambda message: message.text in ["🖼 Картинки", "🎵 Музыка"])
 def choose_category(message):
     uid = message.from_user.id
@@ -204,7 +206,6 @@ def choose_category(message):
     title = "Выбери модель для картинок:" if category == "image" else "Выбери модель для музыки:"
     bot.send_message(message.chat.id, title, reply_markup=markup)
 
-# --- ВЫБОР МОДЕЛИ ---
 @bot.callback_query_handler(func=lambda call: call.data.startswith("model_"))
 def ask_prompt(call):
     bot.answer_callback_query(call.id)
@@ -223,7 +224,6 @@ def ask_prompt(call):
     msg = bot.send_message(uid, f"Выбрана модель: **{MODEL_NAMES[model_id]}** ({price}⭐).\n\nНапиши, что {action}:", parse_mode="Markdown")
     bot.register_next_step_handler(msg, process_prompt)
 
-# --- ОБРАБОТКА ПРОМПТА ---
 def process_prompt(message):
     uid = message.from_user.id
     prompt = message.text
@@ -281,7 +281,7 @@ def got_payment(message):
     generate_media(uid, prompt, model_id)
 
 # ==========================================
-# 4. ГЕНЕРАЦИЯ (Скачивание и отправка файла)
+# 4. ГЕНЕРАЦИЯ
 # ==========================================
 def generate_media(uid, prompt, model_id):
     media_type = MODEL_TYPES[model_id]
@@ -310,7 +310,6 @@ def generate_media(uid, prompt, model_id):
         media_id = res_data.get("id")
         status = res_data.get("status")
         
-        # Ждем завершения, если статус pending
         if status == "pending" and media_id:
             for _ in range(40):
                 time.sleep(3)
@@ -324,7 +323,6 @@ def generate_media(uid, prompt, model_id):
             else:
                 return bot.send_message(uid, "⏳ Время ожидания истекло.")
 
-        # Ищем ссылку в ответе
         media_url = None
         if "data" in res_data and isinstance(res_data["data"], list) and len(res_data["data"]) > 0:
             media_url = res_data["data"][0].get("url")
@@ -334,31 +332,26 @@ def generate_media(uid, prompt, model_id):
         if not media_url:
             return bot.send_message(uid, f"❌ Ошибка: API вернул некорректный URL. Ответ: {res_data}")
 
-        # --- СКАЧИВАЕМ ФАЙЛ НА СЕРВЕР ---
         bot.send_message(uid, "⏳ Скачиваю готовый файл...")
         file_resp = requests.get(media_url, timeout=60)
         
         if file_resp.status_code != 200:
             return bot.send_message(uid, "❌ Не удалось скачать файл с сервера генерации.")
 
-        # Сохраняем во временный файл
         file_ext = ".jpg" if media_type == "image" else ".mp3"
         temp_filename = f"temp_{uid}{file_ext}"
         
         with open(temp_filename, "wb") as f:
             f.write(file_resp.content)
 
-        # --- ОТПРАВЛЯЕМ ФАЙЛ В TELEGRAM ---
         with open(temp_filename, "rb") as f:
             if media_type == "image":
                 bot.send_photo(uid, f, caption=f"🎨 {MODEL_NAMES[model_id]}\nЗапрос: {prompt}")
             else:
                 bot.send_audio(uid, f, caption=f"🎵 {MODEL_NAMES[model_id]}\nЗапрос: {prompt}")
         
-        # Удаляем временный файл
         os.remove(temp_filename)
         
-        # Обновляем статистику
         u = db_get_user(uid)
         if u:
             db_update_user(uid, total_generated=u["total_generated"] + 1)
@@ -383,6 +376,11 @@ def admin_panel(message):
     markup.add(
         types.InlineKeyboardButton("💰 Изменить цены", callback_data="adm_prices"),
         types.InlineKeyboardButton("🚫 Забанить/Разбанить", callback_data="adm_ban")
+    )
+    # НОВЫЕ КНОПКИ
+    markup.add(
+        types.InlineKeyboardButton("🎁 Выдать генерацию", callback_data="adm_gift"),
+        types.InlineKeyboardButton("👥 Список юзеров", callback_data="adm_users")
     )
     bot.send_message(message.chat.id, "🛡 <b>Админ-панель</b>", reply_markup=markup, parse_mode="HTML")
 
@@ -418,6 +416,29 @@ def admin_actions(call):
     elif act == "ban":
         msg = bot.send_message(call.message.chat.id, "Напиши <code>@username</code> или ID пользователя, чтобы забанить/разбанить:")
         bot.register_next_step_handler(msg, admin_ban_user)
+
+    # ЛОГИКА ВЫДАЧИ ГЕНЕРАЦИИ
+    elif act == "gift":
+        msg = bot.send_message(call.message.chat.id, "Напиши <code>@username</code> (или ID) и тип: <code>image</code> или <code>audio</code>.\nПример: <code>@user image</code>")
+        bot.register_next_step_handler(msg, admin_gift_generation)
+
+    # ЛОГИКА СПИСКА ЮЗЕРОВ
+    elif act == "users":
+        users = db_get_all_users()
+        if not users:
+            return bot.send_message(call.message.chat.id, "Пользователей пока нет.")
+        
+        text = "👥 <b>Список пользователей:</b>\n\n"
+        for u_id, uname, is_banned, total in users:
+            status = "🚫" if is_banned else "✅"
+            text += f"{status} @{uname} (ID: <code>{u_id}</code>) — сгенерировано: {total}\n"
+            # Если пользователей много, Телеграм может не принять длинное сообщение. 
+            # В таком случае отправляем частями (упрощенно).
+            if len(text) > 3500:
+                bot.send_message(call.message.chat.id, text, parse_mode="HTML")
+                text = ""
+        if text:
+            bot.send_message(call.message.chat.id, text, parse_mode="HTML")
 
 def admin_broadcast(message):
     text = message.text
@@ -478,6 +499,45 @@ def admin_ban_user(message):
     db_update_user(uid, is_banned=new_status)
     status_text = "забанен" if new_status else "разбанен"
     bot.send_message(message.chat.id, f"✅ Пользователь @{uname} {status_text}.")
+
+def admin_gift_generation(message):
+    try:
+        parts = message.text.split()
+        identifier = parts[0].replace("@", "")
+        m_type = parts[1].lower() # image или audio
+        
+        if m_type not in ["image", "audio"]:
+            return bot.send_message(message.chat.id, "❌ Тип должен быть 'image' или 'audio'.")
+        
+        conn = get_conn()
+        c = conn.cursor()
+        if identifier.isdigit():
+            c.execute("SELECT user_id, username FROM users WHERE user_id = ?", (int(identifier),))
+        else:
+            c.execute("SELECT user_id, username FROM users WHERE LOWER(username) = ?", (identifier.lower(),))
+        row = c.fetchone()
+        conn.close()
+        
+        if not row:
+            return bot.send_message(message.chat.id, "❌ Пользователь не найден.")
+            
+        uid, uname = row
+        
+        # Выдаем подарок (бот запросит промпт у админа, но выдаст пользователю)
+        bot.send_message(message.chat.id, f"Напиши промпт для генерации {m_type} для @{uname}:")
+        bot.register_next_step_handler(message, process_gift_prompt, uid, m_type)
+        
+    except:
+        bot.send_message(message.chat.id, "❌ Ошибка. Пример: <code>@user image</code>", parse_mode="HTML")
+
+def process_gift_prompt(message, target_uid, m_type):
+    prompt = message.text
+    model_id = "openai/gpt-image-1.5" if m_type == "image" else "suno/sounds"
+    
+    bot.send_message(message.chat.id, f"🎁 Генерирую пробный {m_type} для пользователя...")
+    # Генерируем от имени целевого пользователя
+    generate_media(target_uid, prompt, model_id)
+    bot.send_message(message.chat.id, "✅ Пробная генерация отправлена пользователю!")
 
 # ==========================================
 # ЗАПУСК
