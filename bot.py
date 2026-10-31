@@ -239,13 +239,11 @@ def process_prompt(message):
     model_id = data["model"]
     price = data["price"]
 
-    # БЕСПЛАТНО ДЛЯ АДМИНА
     if uid == ADMIN_ID:
         bot.send_message(uid, "👑 Режим админа: бесплатно!")
         generate_media(uid, prompt, model_id)
         return
 
-    # ОПЛАТА
     markup = types.InlineKeyboardMarkup()
     pay_btn = types.InlineKeyboardButton(f"⭐ Оплатить {price} Stars", pay=True)
     markup.add(pay_btn)
@@ -281,14 +279,17 @@ def got_payment(message):
     generate_media(uid, prompt, model_id)
 
 # ==========================================
-# 4. ГЕНЕРАЦИЯ
+# 4. ГЕНЕРАЦИЯ (С ЗАЩИТОЙ ОТ ОШИБОК)
 # ==========================================
 def generate_media(uid, prompt, model_id):
     media_type = MODEL_TYPES[model_id]
     action = 'upload_photo' if media_type == 'image' else 'upload_voice'
     
-    bot.send_chat_action(uid, action)
-    
+    try:
+        bot.send_chat_action(uid, action)
+    except Exception:
+        pass
+        
     try:
         headers = {
             "Authorization": f"Bearer {POLZA_API_KEY}",
@@ -330,13 +331,13 @@ def generate_media(uid, prompt, model_id):
             media_url = res_data["url"]
             
         if not media_url:
-            return bot.send_message(uid, f"❌ Ошибка: API вернул некорректный URL. Ответ: {res_data}")
+            return bot.send_message(uid, f"❌ Ошибка: API вернул некорректный URL.")
 
         bot.send_message(uid, "⏳ Скачиваю готовый файл...")
         file_resp = requests.get(media_url, timeout=60)
         
         if file_resp.status_code != 200:
-            return bot.send_message(uid, "❌ Не удалось скачать файл с сервера генерации.")
+            return bot.send_message(uid, "❌ Не удалось скачать файл.")
 
         file_ext = ".jpg" if media_type == "image" else ".mp3"
         temp_filename = f"temp_{uid}{file_ext}"
@@ -344,13 +345,21 @@ def generate_media(uid, prompt, model_id):
         with open(temp_filename, "wb") as f:
             f.write(file_resp.content)
 
-        with open(temp_filename, "rb") as f:
-            if media_type == "image":
-                bot.send_photo(uid, f, caption=f"🎨 {MODEL_NAMES[model_id]}\nЗапрос: {prompt}")
-            else:
-                bot.send_audio(uid, f, caption=f"🎵 {MODEL_NAMES[model_id]}\nЗапрос: {prompt}")
+        # --- ЗАЩИТА ОТ 403 ОШИБКИ (ПОПЫТКА НАПИСАТЬ БОТУ) ---
+        try:
+            with open(temp_filename, "rb") as f:
+                if media_type == "image":
+                    bot.send_photo(uid, f, caption=f"🎨 {MODEL_NAMES[model_id]}\nЗапрос: {prompt}")
+                else:
+                    bot.send_audio(uid, f, caption=f"🎵 {MODEL_NAMES[model_id]}\nЗапрос: {prompt}")
+        except Exception as send_error:
+            print(f"Ошибка отправки пользователю {uid}: {send_error}")
+            # Если это админ делал подарок, сообщаем ему об ошибке
+            if uid != ADMIN_ID: 
+                bot.send_message(ADMIN_ID, f"⚠️ Не удалось отправить файл пользователю {uid}: {send_error}")
         
-        os.remove(temp_filename)
+        if os.path.exists(temp_filename):
+            os.remove(temp_filename)
         
         u = db_get_user(uid)
         if u:
@@ -360,7 +369,7 @@ def generate_media(uid, prompt, model_id):
             del user_data[uid]
 
     except Exception as e:
-        bot.send_message(uid, f"❌ Произошла ошибка: {e}")
+        print(f"Критическая ошибка: {e}")
 
 # ==========================================
 # 5. АДМИН-ПАНЕЛЬ
@@ -377,7 +386,6 @@ def admin_panel(message):
         types.InlineKeyboardButton("💰 Изменить цены", callback_data="adm_prices"),
         types.InlineKeyboardButton("🚫 Забанить/Разбанить", callback_data="adm_ban")
     )
-    # НОВЫЕ КНОПКИ
     markup.add(
         types.InlineKeyboardButton("🎁 Выдать генерацию", callback_data="adm_gift"),
         types.InlineKeyboardButton("👥 Список юзеров", callback_data="adm_users")
@@ -417,12 +425,10 @@ def admin_actions(call):
         msg = bot.send_message(call.message.chat.id, "Напиши <code>@username</code> или ID пользователя, чтобы забанить/разбанить:")
         bot.register_next_step_handler(msg, admin_ban_user)
 
-    # ЛОГИКА ВЫДАЧИ ГЕНЕРАЦИИ
     elif act == "gift":
         msg = bot.send_message(call.message.chat.id, "Напиши <code>@username</code> (или ID) и тип: <code>image</code> или <code>audio</code>.\nПример: <code>@user image</code>")
         bot.register_next_step_handler(msg, admin_gift_generation)
 
-    # ЛОГИКА СПИСКА ЮЗЕРОВ
     elif act == "users":
         users = db_get_all_users()
         if not users:
@@ -432,8 +438,7 @@ def admin_actions(call):
         for u_id, uname, is_banned, total in users:
             status = "🚫" if is_banned else "✅"
             text += f"{status} @{uname} (ID: <code>{u_id}</code>) — сгенерировано: {total}\n"
-            # Если пользователей много, Телеграм может не принять длинное сообщение. 
-            # В таком случае отправляем частями (упрощенно).
+            
             if len(text) > 3500:
                 bot.send_message(call.message.chat.id, text, parse_mode="HTML")
                 text = ""
@@ -504,7 +509,7 @@ def admin_gift_generation(message):
     try:
         parts = message.text.split()
         identifier = parts[0].replace("@", "")
-        m_type = parts[1].lower() # image или audio
+        m_type = parts[1].lower()
         
         if m_type not in ["image", "audio"]:
             return bot.send_message(message.chat.id, "❌ Тип должен быть 'image' или 'audio'.")
@@ -523,7 +528,6 @@ def admin_gift_generation(message):
             
         uid, uname = row
         
-        # Выдаем подарок (бот запросит промпт у админа, но выдаст пользователю)
         bot.send_message(message.chat.id, f"Напиши промпт для генерации {m_type} для @{uname}:")
         bot.register_next_step_handler(message, process_gift_prompt, uid, m_type)
         
@@ -535,9 +539,8 @@ def process_gift_prompt(message, target_uid, m_type):
     model_id = "openai/gpt-image-1.5" if m_type == "image" else "suno/sounds"
     
     bot.send_message(message.chat.id, f"🎁 Генерирую пробный {m_type} для пользователя...")
-    # Генерируем от имени целевого пользователя
     generate_media(target_uid, prompt, model_id)
-    bot.send_message(message.chat.id, "✅ Пробная генерация отправлена пользователю!")
+    bot.send_message(message.chat.id, "✅ Команда на генерацию отправлена!")
 
 # ==========================================
 # ЗАПУСК
