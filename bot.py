@@ -18,6 +18,7 @@ TERMS_URL = "https://telegra.ph/polzovatelskoe-soglashenie-plamenureralbot-11-01
 
 bot = telebot.TeleBot(TOKEN, threaded=True)
 
+# ... (Словари MODEL_NAMES, MODEL_TYPES, MODEL_PRICES_RUB остаются без изменений) ...
 MODEL_NAMES = {
     "openai/gpt-image-1.5": "GPT Image 1.5", "openai/gpt-5-image": "GPT-5 Image",
     "google/gemini-2.5-flash-image": "Gemini 2.5 Flash", "google/gemini-3.1-flash-lite-image": "Gemini 3.1 Lite",
@@ -26,14 +27,12 @@ MODEL_NAMES = {
     "qwen/image": "Qwen Image", "tongyi-mai/z-image": "Tongyi Z-Image", "yandex/yandex-art": "Yandex Art",
     "google/lyria-3-pro-preview": "Lyria 3 Pro", "suno/sounds": "Suno Sounds", "google/lyria-3-clip-preview": "Lyria 3 Clip"
 }
-
 MODEL_TYPES = {
     "openai/gpt-image-1.5": "image", "openai/gpt-5-image": "image", "google/gemini-2.5-flash-image": "image",
     "google/gemini-3.1-flash-lite-image": "image", "google/gemini-nano-banana-2.1": "image", "black-forest-labs/flux.2-flex": "image",
     "bytedance/seedream-4": "image", "bytedance/seedream-5-lite": "image", "qwen/image": "image", "tongyi-mai/z-image": "image",
     "yandex/yandex-art": "image", "google/lyria-3-pro-preview": "audio", "suno/sounds": "audio", "google/lyria-3-clip-preview": "audio"
 }
-
 MODEL_PRICES_RUB = {
     "openai/gpt-image-1.5": 20, "openai/gpt-5-image": 25, "google/gemini-2.5-flash-image": 15,
     "google/gemini-3.1-flash-lite-image": 10, "google/gemini-nano-banana-2.1": 10, "black-forest-labs/flux.2-flex": 20,
@@ -42,7 +41,7 @@ MODEL_PRICES_RUB = {
 }
 
 user_data = {}
-promo_active = False # Флаг акции
+promo_active = False
 
 # ==========================================
 # 1. БАЗА ДАННЫХ
@@ -57,13 +56,14 @@ def init_db():
         user_id INTEGER PRIMARY KEY, username TEXT, is_banned INTEGER DEFAULT 0, 
         total_generated INTEGER DEFAULT 0, free_image INTEGER DEFAULT 0, free_audio INTEGER DEFAULT 0
     )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS settings (
-        key TEXT PRIMARY KEY, value TEXT
+    c.execute('''CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)''')
+    # НОВАЯ ТАБЛИЦА ДЛЯ ОТЛОЖЕННЫХ ПОДАРКОВ
+    c.execute('''CREATE TABLE IF NOT EXISTS pending_gifts (
+        username TEXT PRIMARY KEY, free_image INTEGER DEFAULT 0, free_audio INTEGER DEFAULT 0
     )''')
     conn.commit()
     conn.close()
     
-    # Загружаем состояние акции
     global promo_active
     conn = get_conn()
     c = conn.cursor()
@@ -75,45 +75,51 @@ def init_db():
 init_db()
 
 def db_get_user(user_id):
-    conn = get_conn()
-    c = conn.cursor()
+    conn = get_conn(); c = conn.cursor()
     c.execute("SELECT username, is_banned, total_generated, free_image, free_audio FROM users WHERE user_id = ?", (user_id,))
-    row = c.fetchone()
-    conn.close()
-    if row:
-        return {"username": row[0], "is_banned": bool(row[1]), "total_generated": row[2], "free_image": row[3], "free_audio": row[4]}
+    row = c.fetchone(); conn.close()
+    if row: return {"username": row[0], "is_banned": bool(row[1]), "total_generated": row[2], "free_image": row[3], "free_audio": row[4]}
     return None
 
 def db_add_user(user_id, username):
-    conn = get_conn()
-    c = conn.cursor()
+    conn = get_conn(); c = conn.cursor()
     c.execute("INSERT OR IGNORE INTO users (user_id, username) VALUES (?, ?)", (user_id, username))
-    conn.commit()
-    conn.close()
+    conn.commit(); conn.close()
 
 def db_update_user(user_id, **kwargs):
-    conn = get_conn()
-    c = conn.cursor()
+    conn = get_conn(); c = conn.cursor()
     for key, val in kwargs.items():
         if key == "is_banned": val = 1 if val else 0
         c.execute(f"UPDATE users SET {key} = ? WHERE user_id = ?", (val, user_id))
-    conn.commit()
-    conn.close()
+    conn.commit(); conn.close()
 
 def db_get_all_users():
-    conn = get_conn()
-    c = conn.cursor()
+    conn = get_conn(); c = conn.cursor()
     c.execute("SELECT user_id, username, is_banned, total_generated FROM users")
-    rows = c.fetchall()
-    conn.close()
+    rows = c.fetchall(); conn.close()
     return rows
 
 def db_set_setting(key, value):
-    conn = get_conn()
-    c = conn.cursor()
+    conn = get_conn(); c = conn.cursor()
     c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, str(value)))
-    conn.commit()
+    conn.commit(); conn.close()
+
+# Функции для отложенных подарков
+def db_add_pending_gift(username, f_img, f_aud):
+    conn = get_conn(); c = conn.cursor()
+    c.execute("INSERT INTO pending_gifts (username, free_image, free_audio) VALUES (?, ?, ?) ON CONFLICT(username) DO UPDATE SET free_image = free_image + excluded.free_image, free_audio = free_audio + excluded.free_audio", (username.lower(), f_img, f_aud))
+    conn.commit(); conn.close()
+
+def db_claim_pending_gift(username):
+    conn = get_conn(); c = conn.cursor()
+    c.execute("SELECT free_image, free_audio FROM pending_gifts WHERE username = ?", (username.lower(),))
+    row = c.fetchone()
+    if row:
+        c.execute("DELETE FROM pending_gifts WHERE username = ?", (username.lower(),))
+        conn.commit(); conn.close()
+        return row[0], row[1] # Возвращает картинки, музыку
     conn.close()
+    return 0, 0
 
 # ==========================================
 # 2. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
@@ -142,10 +148,20 @@ def start(message):
         db_add_user(uid, uname)
         is_new = True
 
-    # Если акция включена и пользователь новый — начисляем бонус
+    # 1. Проверяем отложенные подарки для этого юзернейма
+    pending_img, pending_aud = db_claim_pending_gift(uname)
+    if pending_img > 0 or pending_aud > 0:
+        u = db_get_user(uid)
+        db_update_user(uid, free_image=u["free_image"] + pending_img, free_audio=u["free_audio"] + pending_aud)
+        bot.send_message(uid, f"🎁 <b>Тебе начислен бонус!</b>\n+{pending_img} картинок, +{pending_aud} музыки.", parse_mode="HTML")
+
+    # 2. Если акция включена и пользователь новый — начисляем бонус
     if is_new and promo_active:
-        db_update_user(uid, free_image=3, free_audio=3)
-        bot.send_message(uid, "🎁 <b>Бонус за регистрацию!</b>\nТебе начислено 3 бесплатные генерации картинок и 3 генерации музыки!", parse_mode="HTML")
+        u = db_get_user(uid)
+        # Чтобы не задваивать, если ему уже выдали отложенный подарок
+        if pending_img == 0 and pending_aud == 0:
+            db_update_user(uid, free_image=u["free_image"] + 3, free_audio=u["free_audio"] + 3)
+            bot.send_message(uid, "🎁 <b>Бонус за регистрацию!</b>\nТебе начислено 3 бесплатные генерации картинок и 3 генерации музыки!", parse_mode="HTML")
 
     u = db_get_user(uid)
     if u["is_banned"]:
@@ -371,7 +387,6 @@ def admin_panel(message):
     )
     markup.add(types.InlineKeyboardButton("👥 Список юзеров", callback_data="adm_users"))
     
-    # Кнопка управления акцией
     status = "🟢 ВКЛ" if promo_active else "🔴 ВЫКЛ"
     markup.add(types.InlineKeyboardButton(f"🎁 Бонус 3 генерации (сейчас: {status})", callback_data="adm_promo_menu"))
     
@@ -411,14 +426,13 @@ def admin_actions(call):
                 bot.send_message(call.message.chat.id, text, parse_mode="HTML"); text = ""
         if text: bot.send_message(call.message.chat.id, text, parse_mode="HTML")
 
-    # Логика акции
     elif act == "promo_menu":
         markup = types.InlineKeyboardMarkup(row_width=1)
         markup.add(types.InlineKeyboardButton("🟢 Включить для новых", callback_data="adm_promo_on"))
         markup.add(types.InlineKeyboardButton("🎁 Выдать всем старым", callback_data="adm_promo_old"))
         markup.add(types.InlineKeyboardButton("🎁 Выдать всем (и старым, и новым)", callback_data="adm_promo_all"))
         markup.add(types.InlineKeyboardButton("🔴 Отключить акцию", callback_data="adm_promo_off"))
-        bot.send_message(call.message.chat.id, "🎁 <b>Управление акцией:</b>\n\nВключи для новых (при /start) или выдай всем разом.", reply_markup=markup, parse_mode="HTML")
+        bot.send_message(call.message.chat.id, "🎁 <b>Управление акцией:</b>", reply_markup=markup, parse_mode="HTML")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("adm_promo_"))
 def admin_promo_actions(call):
@@ -445,7 +459,7 @@ def admin_promo_actions(call):
             u = db_get_user(uid)
             if u:
                 db_update_user(uid, free_image=u["free_image"] + 3, free_audio=u["free_audio"] + 3)
-        bot.send_message(call.message.chat.id, f"✅ Выдано по 3+3 генерации всем старым пользователям ({len(users)} чел).")
+        bot.send_message(call.message.chat.id, f"✅ Выдано по 3+3 генерации всем старым ({len(users)} чел).")
     elif action == "all":
         promo_active = True
         db_set_setting("promo_active", "1")
@@ -458,7 +472,7 @@ def admin_promo_actions(call):
             u = db_get_user(uid)
             if u:
                 db_update_user(uid, free_image=u["free_image"] + 3, free_audio=u["free_audio"] + 3)
-        bot.send_message(call.message.chat.id, f"✅ Выдано по 3+3 генерации всем ({len(users)} чел), а новым будет выдаваться автоматом.")
+        bot.send_message(call.message.chat.id, f"✅ Выдано по 3+3 всем ({len(users)} чел), а новым будет выдаваться автоматом.")
 
 def admin_broadcast(message):
     conn = get_conn(); c = conn.cursor(); c.execute("SELECT user_id FROM users WHERE is_banned = 0"); users = c.fetchall(); conn.close()
@@ -485,17 +499,26 @@ def admin_gift_generation(message):
         parts = message.text.split()
         identifier = parts[0].replace("@", ""); m_type = parts[1].lower(); amount = int(parts[2])
         if m_type not in ["image", "audio"]: return bot.send_message(message.chat.id, "❌ Тип: image/audio.")
+        
         conn = get_conn(); c = conn.cursor()
         if identifier.isdigit(): c.execute("SELECT user_id, username, free_image, free_audio FROM users WHERE user_id = ?", (int(identifier),))
         else: c.execute("SELECT user_id, username, free_image, free_audio FROM users WHERE LOWER(username) = ?", (identifier.lower(),))
         row = c.fetchone(); conn.close()
-        if not row: return bot.send_message(message.chat.id, "❌ Не найден.")
-        uid, uname, f_img, f_aud = row
-        if m_type == "image": db_update_user(uid, free_image=f_img + amount)
-        else: db_update_user(uid, free_audio=f_aud + amount)
-        bot.send_message(message.chat.id, f"✅ @{uname} выдано {amount} {m_type}.")
-        try: bot.send_message(uid, f"🎁 Тебе выдано {amount} бесплатных генераций!")
-        except: pass
+        
+        # Если пользователь найден в базе
+        if row:
+            uid, uname, f_img, f_aud = row
+            if m_type == "image": db_update_user(uid, free_image=f_img + amount)
+            else: db_update_user(uid, free_audio=f_aud + amount)
+            bot.send_message(message.chat.id, f"✅ @{uname} выдано {amount} {m_type}.")
+            try: bot.send_message(uid, f"🎁 Тебе выдано {amount} бесплатных генераций!")
+            except: pass
+        else:
+            # Если пользователь НЕ найден (не нажимал /start) — делаем отложенный подарок
+            if m_type == "image": db_add_pending_gift(identifier, amount, 0)
+            else: db_add_pending_gift(identifier, 0, amount)
+            bot.send_message(message.chat.id, f"✅ Пользователь @{identifier} еще не заходил. Бонус ({amount} {m_type}) будет выдан автоматически, как только он нажмет /start.")
+            
     except: bot.send_message(message.chat.id, "❌ Ошибка. Пример: <code>@user image 2</code>", parse_mode="HTML")
 
 # ==========================================
