@@ -13,6 +13,10 @@ CHANNEL_USERNAME = "@PlameChat"
 ADMIN_ID = 7031603236
 DB_PATH = "media_bot.db"
 
+# Ссылки на документы
+PRIVACY_URL = "https://telegra.ph/politika-konfidencialnosti-plamenureralbot-11-01"
+TERMS_URL = "https://telegra.ph/polzovatelskoe-soglashenie-plamenureralbot-11-01-2"
+
 bot = telebot.TeleBot(TOKEN, threaded=True)
 
 MODEL_NAMES = {
@@ -51,7 +55,6 @@ def get_conn():
 def init_db():
     conn = get_conn()
     c = conn.cursor()
-    # ДОБАВЛЕНА КОЛОНКА free_image и free_audio
     c.execute('''CREATE TABLE IF NOT EXISTS users (
         user_id INTEGER PRIMARY KEY, 
         username TEXT, 
@@ -141,6 +144,8 @@ def check_subscription(user_id):
 def get_main_menu(user_id):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.add(types.KeyboardButton("🖼 Картинки"), types.KeyboardButton("🎵 Музыка"))
+    markup.add(types.KeyboardButton("💳 Купить генерации (₽)")) 
+    markup.add(types.KeyboardButton("📄 Документы"), types.KeyboardButton("📞 Поддержка"))
     markup.add(types.KeyboardButton("ℹ️ О боте"))
     if user_id == ADMIN_ID:
         markup.add(types.KeyboardButton("🛡 Админ-панель"))
@@ -196,6 +201,47 @@ def check_sub_callback(call):
 def about_bot(message):
     bot.send_message(message.chat.id, "Бот генерирует картинки и музыку через Polza.ai. Выбери категорию и напиши запрос.")
 
+# --- ДОКУМЕНТЫ ---
+@bot.message_handler(func=lambda message: message.text == "📄 Документы")
+def show_docs(message):
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        types.InlineKeyboardButton("📜 Пользовательское соглашение", url=TERMS_URL),
+        types.InlineKeyboardButton("🔒 Политика конфиденциальности", url=PRIVACY_URL)
+    )
+    bot.send_message(message.chat.id, "📄 <b>Документы проекта:</b>", reply_markup=markup, parse_mode="HTML")
+
+# --- ПОДДЕРЖКА ---
+@bot.message_handler(func=lambda message: message.text == "📞 Поддержка")
+def support(message):
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("Написать в поддержку", url="https://t.me/crptworking"))
+    bot.send_message(message.chat.id, "Если у вас возникли вопросы или проблемы, напишите нам:", reply_markup=markup)
+
+# --- ПОКУПКА ЗА РУБЛИ (Заглушка) ---
+@bot.message_handler(func=lambda message: message.text == "💳 Купить генерации (₽)")
+def buy_rub_menu(message):
+    text = (
+        "💳 <b>Покупка генераций за рубли</b>\n\n"
+        "Выбери тариф:\n"
+        "• 10 генераций — <b>100 ₽</b>\n"
+        "• 25 генераций — <b>200 ₽</b>\n"
+        "• 50 генераций — <b>350 ₽</b>\n\n"
+        "Нажми «Оплатить», чтобы перейти к оплате."
+    )
+    
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("💰 Оплатить 100 ₽", callback_data="pay_rub_stub"))
+    markup.add(types.InlineKeyboardButton("💰 Оплатить 200 ₽", callback_data="pay_rub_stub"))
+    markup.add(types.InlineKeyboardButton("💰 Оплатить 350 ₽", callback_data="pay_rub_stub"))
+    
+    bot.send_message(message.chat.id, text, reply_markup=markup, parse_mode="HTML")
+
+@bot.callback_query_handler(func=lambda call: call.data == "pay_rub_stub")
+def pay_rub_stub(call):
+    bot.answer_callback_query(call.id, "⏳ Оплата временно недоступна. Скоро подключим!", show_alert=True)
+
+# --- ВЫБОР КАТЕГОРИИ ---
 @bot.message_handler(func=lambda message: message.text in ["🖼 Картинки", "🎵 Музыка"])
 def choose_category(message):
     uid = message.from_user.id
@@ -238,6 +284,15 @@ def process_prompt(message):
     uid = message.from_user.id
     prompt = message.text
     
+    # --- ТЕСТОВОЕ СЛОВО ДЛЯ PLATEGA ---
+    if prompt.lower() == "verplatega":
+        return bot.send_message(uid, "✅ Тестовый режим Platega активен. Фильтры NSFW и запрещенного контента работают в штатном режиме. Опасные запросы будут заблокированы.")
+
+    # --- БАЗОВЫЙ ФИЛЬТР NSFW/ЗАПРЕЩЕНКИ ---
+    banned_words = ["порно", "секс", "голая", "насилие", "оружие", "наркотики", "детское", "убийство"]
+    if any(word in prompt.lower() for word in banned_words):
+        return bot.send_message(uid, "❌ Ваш запрос нарушает правила безопасности. Пожалуйста, измените описание.")
+
     if len(prompt) < 3:
         return bot.send_message(uid, "❌ Опиши подробнее.")
 
@@ -250,7 +305,6 @@ def process_prompt(message):
     price = data["price"]
     m_type = MODEL_TYPES[model_id]
 
-    # Проверяем бесплатные генерации
     u = db_get_user(uid)
     if uid == ADMIN_ID:
         bot.send_message(uid, "👑 Режим админа: бесплатно!")
@@ -269,7 +323,6 @@ def process_prompt(message):
         generate_media(uid, prompt, model_id)
         return
 
-    # Если бесплатных нет, просим оплату
     markup = types.InlineKeyboardMarkup()
     pay_btn = types.InlineKeyboardButton(f"⭐ Оплатить {price} Stars", pay=True)
     markup.add(pay_btn)
@@ -380,7 +433,7 @@ def generate_media(uid, prompt, model_id):
         except telebot.apihelper.ApiTelegramException as e:
             print(f"Ошибка отправки пользователю {uid}: {e}")
             if uid == ADMIN_ID:
-                bot.send_message(ADMIN_ID, "❌ Ошибка: не удалось отправить файл (возможно, вы ввели юзернейм бота).")
+                bot.send_message(ADMIN_ID, "❌ Ошибка: не удалось отправить файл.")
         
         if os.path.exists(temp_filename):
             os.remove(temp_filename)
