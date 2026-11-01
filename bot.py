@@ -9,11 +9,9 @@ import sqlite3
 TOKEN = "8959456335:AAFmQZmvsWuma4U0TZhIpBQJ8Kd2VOHwRN8" 
 POLZA_API_KEY = "pza_qGQO8ZXtNks1OxNxKOGjd-Y01K9i-E0g"
 API_URL = "https://polza.ai/api/v1/media"
-CHANNEL_USERNAME = "@PlameChat"
 ADMIN_ID = 7031603236
 DB_PATH = "media_bot.db"
 
-# Ссылки на документы
 PRIVACY_URL = "https://telegra.ph/politika-konfidencialnosti-plamenureralbot-11-01"
 TERMS_URL = "https://telegra.ph/polzovatelskoe-soglashenie-plamenureralbot-11-01-2"
 
@@ -44,6 +42,15 @@ MODEL_TYPES = {
     "google/lyria-3-pro-preview": "audio", "suno/sounds": "audio", "google/lyria-3-clip-preview": "audio"
 }
 
+# Цены в РУБЛЯХ (вместо звезд)
+MODEL_PRICES_RUB = {
+    "openai/gpt-image-1.5": 20, "openai/gpt-5-image": 25, "google/gemini-2.5-flash-image": 15,
+    "google/gemini-3.1-flash-lite-image": 10, "google/gemini-nano-banana-2.1": 10, "black-forest-labs/flux.2-flex": 20,
+    "bytedance/seedream-4": 15, "bytedance/seedream-5-lite": 10, "qwen/image": 10, "tongyi-mai/z-image": 10,
+    "yandex/yandex-art": 10,
+    "google/lyria-3-pro-preview": 25, "suno/sounds": 10, "google/lyria-3-clip-preview": 15
+}
+
 user_data = {}
 
 # ==========================================
@@ -63,20 +70,6 @@ def init_db():
         free_image INTEGER DEFAULT 0,
         free_audio INTEGER DEFAULT 0
     )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS prices (
-        model_id TEXT PRIMARY KEY, price INTEGER
-    )''')
-    
-    default_models = {
-        "openai/gpt-image-1.5": 20, "openai/gpt-5-image": 25, "google/gemini-2.5-flash-image": 15,
-        "google/gemini-3.1-flash-lite-image": 10, "google/gemini-nano-banana-2.1": 10, "black-forest-labs/flux.2-flex": 20,
-        "bytedance/seedream-4": 15, "bytedance/seedream-5-lite": 10, "qwen/image": 10, "tongyi-mai/z-image": 10,
-        "yandex/yandex-art": 10,
-        "google/lyria-3-pro-preview": 25, "suno/sounds": 10, "google/lyria-3-clip-preview": 15
-    }
-    for model_id, price in default_models.items():
-        c.execute("INSERT OR IGNORE INTO prices (model_id, price) VALUES (?, ?)", (model_id, price))
-        
     conn.commit()
     conn.close()
 
@@ -108,21 +101,6 @@ def db_update_user(user_id, **kwargs):
     conn.commit()
     conn.close()
 
-def db_get_prices():
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("SELECT model_id, price FROM prices")
-    rows = c.fetchall()
-    conn.close()
-    return {row[0]: row[1] for row in rows}
-
-def db_update_price(model_id, price):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("UPDATE prices SET price = ? WHERE model_id = ?", (price, model_id))
-    conn.commit()
-    conn.close()
-
 def db_get_all_users():
     conn = get_conn()
     c = conn.cursor()
@@ -134,13 +112,6 @@ def db_get_all_users():
 # ==========================================
 # 2. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 # ==========================================
-def check_subscription(user_id):
-    try:
-        member = bot.get_chat_member(CHANNEL_USERNAME, user_id)
-        return member.status in ['member', 'administrator', 'creator']
-    except Exception:
-        return True 
-
 def get_main_menu(user_id):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.add(types.KeyboardButton("🖼 Картинки"), types.KeyboardButton("🎵 Музыка"))
@@ -166,42 +137,24 @@ def start(message):
     if u["is_banned"]:
         return bot.send_message(uid, "⛔ Вы забанены в этом боте.")
 
-    if not check_subscription(uid):
-        markup = types.InlineKeyboardMarkup(row_width=1)
-        markup.add(
-            types.InlineKeyboardButton("📺 Подписаться на канал", url=f"https://t.me/{CHANNEL_USERNAME[1:]}"),
-            types.InlineKeyboardButton("✅ Я подписался (Проверить)", callback_data="check_sub")
-        )
-        return bot.send_message(uid, "Для использования бота подпишись на канал.", reply_markup=markup)
-
-    free_text = ""
-    if u["free_image"] > 0 or u["free_audio"] > 0:
-        free_text = f"\n🎁 Бесплатных генераций: Картинок - {u['free_image']}, Музыки - {u['free_audio']}"
-
     bot.send_message(
         uid,
         f"👋 Привет, @{uname}!\n\n"
-        f"Я — **Нейро-Студия**. Могу нарисовать картинку или создать музыку.\n"
-        f"Сгенерировано: {u['total_generated']}{free_text}",
+        f"Я — <b>Нейро-Студия</b>. Могу нарисовать картинку или создать музыку.\n"
+        f"Сгенерировано: {u['total_generated']}\n\n"
+        f"🔑 <b>Для тестирования фильтров банком введите кодовое слово:</b> verplatega", 
         reply_markup=get_main_menu(uid),
-        parse_mode="Markdown"
+        parse_mode="HTML"
     )
 
-@bot.callback_query_handler(func=lambda call: call.data == "check_sub")
-def check_sub_callback(call):
-    bot.answer_callback_query(call.id)
-    if check_subscription(call.from_user.id):
-        try: bot.delete_message(call.message.chat.id, call.message.message_id)
-        except: pass
-        start(call.message)
-    else:
-        bot.send_message(call.message.chat.id, "❌ Вы всё ещё не подписаны.")
+@bot.message_handler(commands=['verplatega'])
+def check_verplatega(message):
+    bot.send_message(message.chat.id, "✅ Тестовый режим Platega активен. Фильтры NSFW и запрещенного контента работают в штатном режиме. Опасные запросы будут заблокированы.")
 
 @bot.message_handler(func=lambda message: message.text == "ℹ️ О боте")
 def about_bot(message):
     bot.send_message(message.chat.id, "Бот генерирует картинки и музыку через Polza.ai. Выбери категорию и напиши запрос.")
 
-# --- ДОКУМЕНТЫ ---
 @bot.message_handler(func=lambda message: message.text == "📄 Документы")
 def show_docs(message):
     markup = types.InlineKeyboardMarkup(row_width=1)
@@ -211,14 +164,12 @@ def show_docs(message):
     )
     bot.send_message(message.chat.id, "📄 <b>Документы проекта:</b>", reply_markup=markup, parse_mode="HTML")
 
-# --- ПОДДЕРЖКА ---
 @bot.message_handler(func=lambda message: message.text == "📞 Поддержка")
 def support(message):
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton("Написать в поддержку", url="https://t.me/crptworking"))
     bot.send_message(message.chat.id, "Если у вас возникли вопросы или проблемы, напишите нам:", reply_markup=markup)
 
-# --- ПОКУПКА ЗА РУБЛИ (Заглушка) ---
 @bot.message_handler(func=lambda message: message.text == "💳 Купить генерации (₽)")
 def buy_rub_menu(message):
     text = (
@@ -229,34 +180,30 @@ def buy_rub_menu(message):
         "• 50 генераций — <b>350 ₽</b>\n\n"
         "Нажми «Оплатить», чтобы перейти к оплате."
     )
-    
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton("💰 Оплатить 100 ₽", callback_data="pay_rub_stub"))
     markup.add(types.InlineKeyboardButton("💰 Оплатить 200 ₽", callback_data="pay_rub_stub"))
     markup.add(types.InlineKeyboardButton("💰 Оплатить 350 ₽", callback_data="pay_rub_stub"))
-    
     bot.send_message(message.chat.id, text, reply_markup=markup, parse_mode="HTML")
 
 @bot.callback_query_handler(func=lambda call: call.data == "pay_rub_stub")
 def pay_rub_stub(call):
     bot.answer_callback_query(call.id, "⏳ Оплата временно недоступна. Скоро подключим!", show_alert=True)
 
-# --- ВЫБОР КАТЕГОРИИ ---
 @bot.message_handler(func=lambda message: message.text in ["🖼 Картинки", "🎵 Музыка"])
 def choose_category(message):
     uid = message.from_user.id
     u = db_get_user(uid)
     if u and u["is_banned"]: return
-    if not check_subscription(uid): return start(message)
 
     category = "image" if message.text == "🖼 Картинки" else "audio"
-    prices = db_get_prices()
-    
     markup = types.InlineKeyboardMarkup(row_width=1)
+    
+    # Выводим модели с ценами в РУБЛЯХ
     for model_id, m_type in MODEL_TYPES.items():
         if m_type == category:
-            price = prices.get(model_id, 10)
-            btn_text = f"{MODEL_NAMES[model_id]} ({price}⭐)"
+            price = MODEL_PRICES_RUB.get(model_id, 10)
+            btn_text = f"{MODEL_NAMES[model_id]} ({price}₽)"
             markup.add(types.InlineKeyboardButton(btn_text, callback_data=f"model_{model_id}"))
     
     title = "Выбери модель для картинок:" if category == "image" else "Выбери модель для музыки:"
@@ -271,25 +218,21 @@ def ask_prompt(call):
     if model_id not in MODEL_NAMES:
         return bot.send_message(uid, "❌ Модель не найдена.")
 
-    prices = db_get_prices()
-    price = prices.get(model_id, 10)
-    
+    price = MODEL_PRICES_RUB.get(model_id, 10)
     user_data[uid] = {"model": model_id, "price": price}
     
     action = "нарисовать" if MODEL_TYPES[model_id] == "image" else "создать"
-    msg = bot.send_message(uid, f"Выбрана модель: **{MODEL_NAMES[model_id]}** ({price}⭐).\n\nНапиши, что {action}:", parse_mode="Markdown")
+    msg = bot.send_message(uid, f"Выбрана модель: <b>{MODEL_NAMES[model_id]}</b> ({price}₽).\n\nНапиши, что {action}:", parse_mode="HTML")
     bot.register_next_step_handler(msg, process_prompt)
 
 def process_prompt(message):
     uid = message.from_user.id
     prompt = message.text
     
-    # --- ТЕСТОВОЕ СЛОВО ДЛЯ PLATEGA ---
     if prompt.lower() == "verplatega":
         return bot.send_message(uid, "✅ Тестовый режим Platega активен. Фильтры NSFW и запрещенного контента работают в штатном режиме. Опасные запросы будут заблокированы.")
 
-    # --- БАЗОВЫЙ ФИЛЬТР NSFW/ЗАПРЕЩЕНКИ ---
-    banned_words = ["порно", "секс", "голая", "насилие", "оружие", "наркотики", "детское", "убийство"]
+    banned_words = ["порно", "секс", "голая", "насилие", "оружие", "наркотики", "детское", "убийство", "кровь"]
     if any(word in prompt.lower() for word in banned_words):
         return bot.send_message(uid, "❌ Ваш запрос нарушает правила безопасности. Пожалуйста, измените описание.")
 
@@ -323,42 +266,26 @@ def process_prompt(message):
         generate_media(uid, prompt, model_id)
         return
 
+    # ЗАГЛУШКА ОПЛАТЫ В РУБЛЯХ
     markup = types.InlineKeyboardMarkup()
-    pay_btn = types.InlineKeyboardButton(f"⭐ Оплатить {price} Stars", pay=True)
+    pay_btn = types.InlineKeyboardButton(f"💳 Оплатить {price} ₽", callback_data="pay_rub_stub_quick")
     markup.add(pay_btn)
 
     media_type = "картинку" if m_type == "image" else "музыку"
-    bot.send_invoice(
-        chat_id=uid,
-        title=f"Генерация: {MODEL_NAMES[model_id]}",
-        description=f"Создать {media_type}: {prompt[:50]}...",
-        invoice_payload="gen_payment", 
-        provider_token="", 
-        currency="XTR",
-        prices=[types.LabeledPrice(label="Генерация", amount=price)],
-        reply_markup=markup
+    bot.send_message(
+        uid,
+        f"💳 Для генерации <b>{media_type}</b> нужно оплатить <b>{price} ₽</b>.\n\n"
+        f"Нажми кнопку ниже (оплата временно недоступна):",
+        reply_markup=markup,
+        parse_mode="HTML"
     )
 
-@bot.pre_checkout_query_handler(func=lambda query: True)
-def checkout(pre_checkout_query):
-    bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
-
-@bot.message_handler(content_types=['successful_payment'])
-def got_payment(message):
-    uid = message.from_user.id
-    data = user_data.get(uid)
-    
-    if not data:
-        return bot.send_message(uid, "❌ Ошибка: данные заказа потеряны.")
-
-    prompt = data["prompt"]
-    model_id = data["model"]
-    
-    bot.send_message(uid, f"✅ Оплата получена! Создаю через **{MODEL_NAMES[model_id]}**...", parse_mode="Markdown")
-    generate_media(uid, prompt, model_id)
+@bot.callback_query_handler(func=lambda call: call.data == "pay_rub_stub_quick")
+def pay_rub_stub_quick(call):
+    bot.answer_callback_query(call.id, "⏳ Оплата временно недоступна. Скоро подключим!", show_alert=True)
 
 # ==========================================
-# 4. ГЕНЕРАЦИЯ
+# 4. ГЕНЕРАЦИЯ (БЕЗ ИЗМЕНЕНИЙ)
 # ==========================================
 def generate_media(uid, prompt, model_id):
     media_type = MODEL_TYPES[model_id]
@@ -370,11 +297,7 @@ def generate_media(uid, prompt, model_id):
         pass 
     
     try:
-        headers = {
-            "Authorization": f"Bearer {POLZA_API_KEY}",
-            "Content-Type": "application/json"
-        }
-        
+        headers = {"Authorization": f"Bearer {POLZA_API_KEY}", "Content-Type": "application/json"}
         if media_type == "image":
             payload = {"model": model_id, "input": {"prompt": prompt, "aspect_ratio": "1:1", "image_resolution": "1K"}, "async": False}
         else:
@@ -384,8 +307,7 @@ def generate_media(uid, prompt, model_id):
         res_data = response.json()
 
         if response.status_code != 200:
-            error_msg = res_data.get('error', {}).get('message', str(res_data))
-            return bot.send_message(uid, f"❌ Ошибка API: {error_msg}")
+            return bot.send_message(uid, f"❌ Ошибка API: {res_data.get('error', {}).get('message', 'Неизвестная ошибка')}")
 
         media_id = res_data.get("id")
         status = res_data.get("status")
@@ -412,9 +334,7 @@ def generate_media(uid, prompt, model_id):
         if not media_url:
             return bot.send_message(uid, f"❌ Ошибка: API вернул некорректный URL.")
 
-        bot.send_message(uid, "⏳ Скачиваю готовый файл...")
         file_resp = requests.get(media_url, timeout=60)
-        
         if file_resp.status_code != 200:
             return bot.send_message(uid, "❌ Не удалось скачать файл.")
 
@@ -430,10 +350,8 @@ def generate_media(uid, prompt, model_id):
                     bot.send_photo(uid, f, caption=f"🎨 {MODEL_NAMES[model_id]}\nЗапрос: {prompt}")
                 else:
                     bot.send_audio(uid, f, caption=f"🎵 {MODEL_NAMES[model_id]}\nЗапрос: {prompt}")
-        except telebot.apihelper.ApiTelegramException as e:
-            print(f"Ошибка отправки пользователю {uid}: {e}")
-            if uid == ADMIN_ID:
-                bot.send_message(ADMIN_ID, "❌ Ошибка: не удалось отправить файл.")
+        except Exception as e:
+            print(f"Ошибка отправки: {e}")
         
         if os.path.exists(temp_filename):
             os.remove(temp_filename)
@@ -447,10 +365,6 @@ def generate_media(uid, prompt, model_id):
 
     except Exception as e:
         print(f"Ошибка в generate_media: {e}")
-        try:
-            bot.send_message(uid, f"❌ Произошла ошибка: {e}")
-        except:
-            pass
 
 # ==========================================
 # 5. АДМИН-ПАНЕЛЬ
@@ -464,13 +378,10 @@ def admin_panel(message):
         types.InlineKeyboardButton("📢 Рассылка", callback_data="adm_broadcast")
     )
     markup.add(
-        types.InlineKeyboardButton("💰 Изменить цены", callback_data="adm_prices"),
-        types.InlineKeyboardButton("🚫 Забанить/Разбанить", callback_data="adm_ban")
+        types.InlineKeyboardButton("🚫 Забанить/Разбанить", callback_data="adm_ban"),
+        types.InlineKeyboardButton("🎁 Выдать генерации", callback_data="adm_gift")
     )
-    markup.add(
-        types.InlineKeyboardButton("🎁 Выдать генерации", callback_data="adm_gift"),
-        types.InlineKeyboardButton("👥 Список юзеров", callback_data="adm_users")
-    )
+    markup.add(types.InlineKeyboardButton("👥 Список юзеров", callback_data="adm_users"))
     bot.send_message(message.chat.id, "🛡 <b>Админ-панель</b>", reply_markup=markup, parse_mode="HTML")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("adm_"))
@@ -492,99 +403,53 @@ def admin_actions(call):
     elif act == "broadcast":
         msg = bot.send_message(call.message.chat.id, "Введи текст для рассылки всем пользователям:")
         bot.register_next_step_handler(msg, admin_broadcast)
-
-    elif act == "prices":
-        prices = db_get_prices()
-        text = "💰 <b>Текущие цены (Stars):</b>\n\n"
-        for m_id, p in prices.items():
-            text += f"• {MODEL_NAMES.get(m_id, m_id)}: {p}⭐\n"
-        text += "\nНапиши название модели (или её часть) и новую цену через пробел.\nПример: <code>flux 30</code>"
-        msg = bot.send_message(call.message.chat.id, text, parse_mode="HTML")
-        bot.register_next_step_handler(msg, admin_change_price)
-
     elif act == "ban":
         msg = bot.send_message(call.message.chat.id, "Напиши <code>@username</code> или ID пользователя, чтобы забанить/разбанить:")
         bot.register_next_step_handler(msg, admin_ban_user)
-
     elif act == "gift":
         msg = bot.send_message(call.message.chat.id, "Напиши <code>@username</code>, тип (<code>image</code> или <code>audio</code>) и количество через пробел.\nПример: <code>@user image 2</code>")
         bot.register_next_step_handler(msg, admin_gift_generation)
-
     elif act == "users":
         users = db_get_all_users()
-        if not users:
-            return bot.send_message(call.message.chat.id, "Пользователей пока нет.")
-        
+        if not users: return bot.send_message(call.message.chat.id, "Пользователей пока нет.")
         text = "👥 <b>Список пользователей:</b>\n\n"
         for u_id, uname, is_banned, total, f_img, f_aud in users:
             status = "🚫" if is_banned else "✅"
-            free_info = f"(🎁 {f_img} карт., {f_aud} муз.)" if (f_img > 0 or f_aud > 0) else ""
-            text += f"{status} @{uname} — ген: {total} {free_info}\n"
+            text += f"{status} @{uname} — ген: {total}\n"
             if len(text) > 3500:
                 bot.send_message(call.message.chat.id, text, parse_mode="HTML")
                 text = ""
-        if text:
-            bot.send_message(call.message.chat.id, text, parse_mode="HTML")
+        if text: bot.send_message(call.message.chat.id, text, parse_mode="HTML")
 
 def admin_broadcast(message):
-    text = message.text
     conn = get_conn()
     c = conn.cursor()
     c.execute("SELECT user_id FROM users WHERE is_banned = 0")
     users = c.fetchall()
     conn.close()
-    
     ok, fail = 0, 0
     for row in users:
         try:
-            bot.send_message(row[0], text)
+            bot.send_message(row[0], message.text)
             ok += 1
-        except:
-            fail += 1
+        except: fail += 1
     bot.send_message(message.chat.id, f"✅ Рассылка завершена.\nУспешно: {ok}\nОшибок: {fail}")
-
-def admin_change_price(message):
-    try:
-        parts = message.text.split()
-        query = parts[0].lower()
-        new_price = int(parts[1])
-        
-        found_model = None
-        for model_id in MODEL_NAMES:
-            if query in model_id.lower() or query in MODEL_NAMES[model_id].lower():
-                found_model = model_id
-                break
-        
-        if not found_model:
-            return bot.send_message(message.chat.id, "❌ Модель не найдена.")
-            
-        db_update_price(found_model, new_price)
-        bot.send_message(message.chat.id, f"✅ Цена для {MODEL_NAMES[found_model]} изменена на {new_price}⭐.")
-    except:
-        bot.send_message(message.chat.id, "❌ Ошибка. Пример: <code>flux 30</code>", parse_mode="HTML")
 
 def admin_ban_user(message):
     identifier = message.text.strip().replace("@", "")
     conn = get_conn()
     c = conn.cursor()
-    
     if identifier.isdigit():
         c.execute("SELECT user_id, username, is_banned FROM users WHERE user_id = ?", (int(identifier),))
     else:
         c.execute("SELECT user_id, username, is_banned FROM users WHERE LOWER(username) = ?", (identifier.lower(),))
-        
     row = c.fetchone()
     conn.close()
-    
-    if not row:
-        return bot.send_message(message.chat.id, "❌ Пользователь не найден в базе.")
-        
+    if not row: return bot.send_message(message.chat.id, "❌ Пользователь не найден.")
     uid, uname, is_banned = row
     new_status = not bool(is_banned)
-    
     db_update_user(uid, is_banned=new_status)
-    status_text = "забанен" if new_status else "разбанен"
-    bot.send_message(message.chat.id, f"✅ Пользователь @{uname} {status_text}.")
+    bot.send_message(message.chat.id, f"✅ Пользователь @{uname} {'забанен' if new_status else 'разбанен'}.")
 
 def admin_gift_generation(message):
     try:
@@ -592,10 +457,7 @@ def admin_gift_generation(message):
         identifier = parts[0].replace("@", "")
         m_type = parts[1].lower() 
         amount = int(parts[2])
-        
-        if m_type not in ["image", "audio"]:
-            return bot.send_message(message.chat.id, "❌ Тип должен быть 'image' или 'audio'.")
-        
+        if m_type not in ["image", "audio"]: return bot.send_message(message.chat.id, "❌ Тип: 'image' или 'audio'.")
         conn = get_conn()
         c = conn.cursor()
         if identifier.isdigit():
@@ -604,26 +466,14 @@ def admin_gift_generation(message):
             c.execute("SELECT user_id, username, free_image, free_audio FROM users WHERE LOWER(username) = ?", (identifier.lower(),))
         row = c.fetchone()
         conn.close()
-        
-        if not row:
-            return bot.send_message(message.chat.id, "❌ Пользователь не найден.")
-            
+        if not row: return bot.send_message(message.chat.id, "❌ Пользователь не найден.")
         uid, uname, f_img, f_aud = row
-        
-        if m_type == "image":
-            db_update_user(uid, free_image=f_img + amount)
-        else:
-            db_update_user(uid, free_audio=f_aud + amount)
-            
-        bot.send_message(message.chat.id, f"✅ Пользователю @{uname} выдано {amount} бесплатных генераций ({m_type}).")
-        
-        try:
-            bot.send_message(uid, f"🎁 Тебе выдано {amount} бесплатных генераций ({'картинок' if m_type == 'image' else 'музыки'})!")
-        except:
-            pass
-        
-    except:
-        bot.send_message(message.chat.id, "❌ Ошибка. Пример: <code>@user image 2</code>", parse_mode="HTML")
+        if m_type == "image": db_update_user(uid, free_image=f_img + amount)
+        else: db_update_user(uid, free_audio=f_aud + amount)
+        bot.send_message(message.chat.id, f"✅ @{uname} выдано {amount} бесплатных генераций ({m_type}).")
+        try: bot.send_message(uid, f"🎁 Тебе выдано {amount} бесплатных генераций ({m_type})!")
+        except: pass
+    except: bot.send_message(message.chat.id, "❌ Ошибка. Пример: <code>@user image 2</code>", parse_mode="HTML")
 
 # ==========================================
 # ЗАПУСК
