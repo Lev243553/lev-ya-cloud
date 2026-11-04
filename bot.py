@@ -1,4 +1,4 @@
-# bot.py — Нейро-Студия v13 (Компактный UX + Полная Админка)
+# bot.py — Нейро-Студия v14 (Админка с выдачей по @username)
 import os, re, time, base64, uuid, sqlite3, logging, threading
 from datetime import datetime
 from dotenv import load_dotenv
@@ -258,6 +258,35 @@ def sub_can_use(u):
     return True, ""
 
 # ==========================================================
+# ФУНКЦИЯ ПОИСКА ЮЗЕРА ПО НИКУ ИЛИ ID
+# ==========================================================
+def resolve_user(target_str):
+    """Принимает ID или @username, возвращает (user_id, username) или (None, None)"""
+    target_str = target_str.strip()
+    if target_str.isdigit():
+        uid = int(target_str)
+        u = get_user(uid)
+        return (uid, u["username"] if u else f"id{uid}")
+        
+    username = target_str.replace("@", "").lower()
+    cc = conn(); cur = cc.cursor()
+    cur.execute("SELECT user_id, username FROM users WHERE LOWER(username) = ?", (username,))
+    row = cur.fetchone(); cc.close()
+    
+    if row:
+        return row[0], row[1]
+        
+    # Если нет в базе, пробуем через Telegram API
+    try:
+        chat = bot.get_chat(f"@{username}")
+        uid = chat.id
+        if not get_user(uid):
+            add_user(uid, username)
+        return uid, username
+    except Exception:
+        return None, None
+
+# ==========================================================
 # МЕНЮ И КЛАВИАТУРЫ
 # ==========================================================
 def main_menu(uid):
@@ -277,7 +306,6 @@ def main_menu(uid):
     kb.add(types.InlineKeyboardButton("🎁 Бонус дня", callback_data="menu_bonus"),
            types.InlineKeyboardButton("🏆 Задания", callback_data="menu_quest"))
     kb.add(types.InlineKeyboardButton("📞 Поддержка", url=SUPPORT_URL))
-    
     if uid == ADMIN_ID: kb.add(types.InlineKeyboardButton("🛡 Админ-панель", callback_data="admin_root"))
     return kb
 
@@ -288,7 +316,7 @@ def cancel_kb():
     return types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("❌ Отмена", callback_data="menu_main"))
 
 # ==========================================================
-# СТАРТ И МЕНЮ
+# СТАРТ
 # ==========================================================
 @bot.message_handler(commands=["start"])
 def start(m):
@@ -331,7 +359,7 @@ def cb_main(c):
     bot.edit_message_text("Выбери, что хочешь сгенерировать:", c.message.chat.id, c.message.message_id, reply_markup=main_menu(c.from_user.id))
 
 # ==========================================================
-# АДМИНКА (ПОЛНАЯ)
+# АДМИНКА
 # ==========================================================
 @bot.callback_query_handler(func=lambda c: c.data.startswith("admin_") and c.from_user.id == ADMIN_ID)
 def admin_router(c):
@@ -357,7 +385,7 @@ def admin_router(c):
         bot.edit_message_text(txt, c.message.chat.id, c.message.message_id, reply_markup=kb, parse_mode="HTML")
 
     elif act == "users":
-        txt = "Введи <code>ID</code> юзера (число) или <code>@username</code>. \n\nТакже можешь сразу выдать баланс командой: <code>/give ID тип кол-во</code>"
+        txt = "Введи <code>@username</code> или <code>ID</code> юзера.\n\nЛибо выдай баланс командой: <code>/give @username image 10</code>"
         msg = bot.send_message(c.message.chat.id, txt, parse_mode="HTML")
         bot.register_next_step_handler(msg, admin_find_user)
 
@@ -386,51 +414,51 @@ def admin_router(c):
         kb = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_root"))
         bot.edit_message_text(txt[:4000], c.message.chat.id, c.message.message_id, reply_markup=kb, parse_mode="HTML")
 
-# Хендлер для поиска юзера
 def admin_find_user(m):
-    q = m.text.strip().replace("@","").lower()
-    cc = conn(); cur = cc.cursor()
-    if q.isdigit(): cur.execute("SELECT user_id FROM users WHERE user_id=?", (int(q),))
-    else: cur.execute("SELECT user_id FROM users WHERE LOWER(username)=?", (q,))
-    row = cur.fetchone(); cc.close()
-    if not row:
-        # Если не найден, предлагаем создать
-        txt = "❌ Юзер не найден. Хочешь создать и выдать баланс?\nВведи: <code>ID тип кол-во</code>\nПример: <code>123456 image 10</code>"
+    uid, uname = resolve_user(m.text)
+    if not uid:
+        txt = "❌ Юзер не найден.\n\nХочешь создать и выдать баланс?\nВведи: <code>@username тип кол-во</code>\nПример: <code>@g7aj60qk image 10</code>"
         msg = bot.send_message(m.chat.id, txt, parse_mode="HTML")
         bot.register_next_step_handler(msg, admin_give_balance_direct)
         return
-    uid = row[0]; u = get_user(uid)
+        
+    u = get_user(uid)
     txt = f"👤 <b>@{u['username']}</b> (ID: <code>{uid}</code>)\nГенераций: {u['total_generated']}\n\n🖼{u['balance_img']} 🎵{u['balance_aud']} 🎬{u['balance_vid']}\n🗣{u['balance_tts']} 📝{u['balance_stt']} ✏️{u['balance_edit']}\n🎞{u['balance_anim']} 🔍{u['balance_up']}"
     kb = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⭐ Выдать", callback_data=f"g_{uid}"))
     kb.add(types.InlineKeyboardButton("🚫 Бан/Разбан", callback_data=f"b_{uid}"))
     kb.add(types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_root"))
     bot.send_message(m.chat.id, txt, reply_markup=kb, parse_mode="HTML")
 
-# Универсальная выдача (даже для новых)
 @bot.message_handler(commands=['give'])
 def admin_give_cmd(m):
     if m.from_user.id != ADMIN_ID: return
     try:
-        _, uid, m_type, amount = m.text.split()
-        uid, amount = int(uid), int(amount)
+        _, target, m_type, amount = m.text.split()
+        amount = int(amount)
         if m_type not in BAL_FIELD: raise ValueError("Тип неверный")
+        
+        uid, uname = resolve_user(target)
+        if not uid:
+            return bot.send_message(m.chat.id, f"❌ Юзер {target} не найден. Он должен хотя бы раз зайти в бота или у него нет юзернейма.")
+            
         u = get_user(uid)
-        if not u:
-            add_user(uid, f"id{uid}")
-            u = get_user(uid)
         upd(uid, **{BAL_FIELD[m_type]: u[BAL_FIELD[m_type]] + amount})
-        bot.send_message(m.chat.id, f"✅ Юзеру {uid} выдано {amount} {m_type}")
+        bot.send_message(m.chat.id, f"✅ Юзеру @{uname} (ID: {uid}) выдано {amount} {m_type}")
         try: bot.send_message(uid, f"🎁 Тебе начислено {amount} ({m_type})")
         except: pass
-    except: bot.send_message(m.chat.id, "❌ Формат: <code>/give 123456 image 10</code>", parse_mode="HTML")
+    except ValueError as ve:
+        bot.send_message(m.chat.id, f"❌ Ошибка: {ve}\nФормат: <code>/give @username image 10</code> или <code>/give 123456 image 10</code>", parse_mode="HTML")
+    except Exception as e:
+        bot.send_message(m.chat.id, "❌ Ошибка формата. Пример: <code>/give @username image 10</code>", parse_mode="HTML")
 
 def admin_give_balance_direct(m):
     try:
         parts = m.text.split()
         if len(parts) == 3:
-            uid, m_type, amount = int(parts[0]), parts[1].lower(), int(parts[2])
+            target, m_type, amount = parts[0], parts[1].lower(), int(parts[2])
             if m_type not in BAL_FIELD: raise ValueError
-            if not get_user(uid): add_user(uid, f"id{uid}")
+            uid, uname = resolve_user(target)
+            if not uid: return bot.send_message(m.chat.id, "❌ Юзер так и не найден.")
             u = get_user(uid)
             upd(uid, **{BAL_FIELD[m_type]: u[BAL_FIELD[m_type]] + amount})
             bot.send_message(m.chat.id, f"✅ Создан и выдан {amount} {m_type}")
@@ -476,7 +504,7 @@ def cb_m_toggle(c):
     bot.send_message(c.message.chat.id, f"{MODELS[mid]['name']}: изменено. /start для обновления.")
 
 # ==========================================================
-# ОСТАЛЬНЫЕ INLINE КНОПКИ ЮЗЕРА
+# ОСТАЛЬНОЕ МЕНЮ
 # ==========================================================
 @bot.callback_query_handler(func=lambda c: c.data == "menu_balance")
 def cb_balance(c):
@@ -659,7 +687,6 @@ def gen(uid, message, mid, m_type, price, is_admin, paid_by):
     inp = {"prompt": prompt}
     if duration: inp["duration"] = duration
     if file_bytes:
-        import base64
         b64 = base64.b64encode(file_bytes).decode()
         if m_type in ("edit","animate"): inp["images"] = [{"type": "base64", "data": f"data:image/jpeg;base64,{b64}"}]
         elif m_type == "upscale": inp["videos" if "video" in mid else "images"] = [{"type": "base64", "data": f"data:image/jpeg;base64,{b64}"}]
@@ -709,5 +736,5 @@ def gen(uid, message, mid, m_type, price, is_admin, paid_by):
         if paid_by == "balance": refund(uid, m_type)
 
 if __name__ == "__main__":
-    log.info("🚀 Бот запущен (v13 Админка)")
+    log.info("🚀 Бот запущен (v14 @username)")
     bot.infinity_polling(timeout=10, long_polling_timeout=5)
