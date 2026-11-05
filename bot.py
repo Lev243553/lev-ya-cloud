@@ -1,4 +1,4 @@
-# bot.py — Нейро-Студия v22 (ФИНАЛ: Всё в одном файле)
+# bot.py — Нейро-Студия v24 (ФИНАЛ: Чат-режим + Полная админка)
 import os, re, time, base64, uuid, sqlite3, logging, threading, json
 from datetime import datetime
 from dotenv import load_dotenv
@@ -31,6 +31,7 @@ REF_BONUS        = int(os.getenv("REF_BONUS", "3"))
 RATE_LIMIT       = int(os.getenv("RATE_LIMIT_PER_HOUR", "20"))
 DAILY_BONUS      = os.getenv("DAILY_BONUS_ENABLED", "1") == "1"
 FREE_TEXT_LIMIT  = 5
+MAX_HISTORY      = 6 
 
 SUB_TARIFFS = {
     "start": {"title":"Старт",  "price": int(os.getenv("SUB_START_PRICE","290")), "limit": int(os.getenv("SUB_START_LIMIT","30")), "days":30},
@@ -136,6 +137,7 @@ def init_db():
         balance_tts INTEGER DEFAULT 0, balance_stt INTEGER DEFAULT 0, balance_edit INTEGER DEFAULT 0,
         balance_anim INTEGER DEFAULT 0, balance_up INTEGER DEFAULT 0,
         text_free_used INTEGER DEFAULT 0,
+        chat_history TEXT DEFAULT '[]',
         sub_plan TEXT DEFAULT '', sub_until REAL DEFAULT 0, sub_used INTEGER DEFAULT 0,
         sub_auto INTEGER DEFAULT 0, sub_id TEXT DEFAULT '',
         last_bonus REAL DEFAULT 0, sub_notified INTEGER DEFAULT 0,
@@ -158,6 +160,8 @@ def init_db():
     
     try: cur.execute("ALTER TABLE users ADD COLUMN text_free_used INTEGER DEFAULT 0")
     except: pass
+    try: cur.execute("ALTER TABLE users ADD COLUMN chat_history TEXT DEFAULT '[]'")
+    except: pass
     
     for mid, m in MODELS.items():
         cur.execute("INSERT OR IGNORE INTO models VALUES(?,?,?,?)", (mid, m["active"], m["price"], m["cost"]))
@@ -171,14 +175,14 @@ def get_user(uid):
     c = conn(); cur = c.cursor()
     cur.execute("""SELECT username,is_banned,total_generated,free_image,free_audio,free_video,
         balance_img,balance_aud,balance_vid,balance_tts,balance_stt,balance_edit,balance_anim,balance_up,
-        text_free_used, referrals,referrer_id,q_bought,reward_claimed,sub_plan,sub_until,sub_used,
+        text_free_used, chat_history, referrals,referrer_id,q_bought,reward_claimed,sub_plan,sub_until,sub_used,
         sub_auto,sub_id, last_bonus,sub_notified,onboarded,state,temp_model_id,temp_price
         FROM users WHERE user_id=?""", (uid,))
     r = cur.fetchone(); c.close()
     if not r: return None
     keys = ["username","is_banned","total_generated","free_image","free_audio","free_video",
             "balance_img","balance_aud","balance_vid","balance_tts","balance_stt","balance_edit",
-            "balance_anim","balance_up","text_free_used", "referrals","referrer_id","q_bought","reward_claimed",
+            "balance_anim","balance_up","text_free_used", "chat_history", "referrals","referrer_id","q_bought","reward_claimed",
             "sub_plan","sub_until","sub_used", "sub_auto","sub_id",
             "last_bonus","sub_notified","onboarded","state","temp_model_id","temp_price"]
     d = dict(zip(keys, r)); d["is_banned"] = bool(d["is_banned"]); return d
@@ -312,6 +316,12 @@ def back_menu():
 def cancel_kb():
     return types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("❌ Отмена", callback_data="menu_main"))
 
+def chat_kb():
+    return types.InlineKeyboardMarkup().add(
+        types.InlineKeyboardButton("🧹 Очистить чат", callback_data="clear_chat"),
+        types.InlineKeyboardButton("⬅️ В меню", callback_data="menu_main")
+    )
+
 # ==========================================================
 # СТАРТ
 # ==========================================================
@@ -355,6 +365,12 @@ def cb_main(c):
     bot.answer_callback_query(c.id)
     bot.edit_message_text("Выбери, что хочешь сгенерировать:", c.message.chat.id, c.message.message_id, reply_markup=main_menu(c.from_user.id))
 
+@bot.callback_query_handler(func=lambda c: c.data == "clear_chat")
+def cb_clear_chat(c):
+    bot.answer_callback_query(c.id, "🧹 История чата очищена.")
+    upd(c.from_user.id, chat_history="[]")
+    bot.edit_message_text("История чата очищена. Можешь начать новый диалог.", c.message.chat.id, c.message.message_id, reply_markup=chat_kb())
+
 # ==========================================================
 # КАТЕГОРИИ И МОДЕЛИ
 # ==========================================================
@@ -389,7 +405,7 @@ def cb_model(c):
 
     if m_type == "text":
         set_state(c.from_user.id, "waiting_for_prompt", mid, 0)
-        return bot.edit_message_text(f"<b>{MODELS[mid]['name']}</b>.\nНапиши свой вопрос:", c.message.chat.id, c.message.message_id, reply_markup=cancel_kb(), parse_mode="HTML")
+        return bot.edit_message_text(f"<b>{MODELS[mid]['name']}</b>.\n\n💬 Это чат-режим. Бот помнит историю. Напиши свой вопрос:", c.message.chat.id, c.message.message_id, reply_markup=chat_kb(), parse_mode="HTML")
 
     if m["price"] >= 15 and m_type != "video":
         kb = types.InlineKeyboardMarkup(row_width=2)
@@ -471,38 +487,59 @@ def gen(uid, message, mid, m_type, price, is_admin, paid_by):
         try: file_bytes = bot.download_file(bot.get_file(file_id).file_path)
         except: pass
 
-    # ==================== ТЕКСТОВЫЕ ЗАПРОСЫ (OPENROUTER) ====================
+    # ==================== ТЕКСТОВЫЕ ЗАПРОСЫ (ЧАТ-РЕЖИМ) ====================
     if m_type == "text":
         status = bot.send_message(uid, "💬 Думаю над ответом...")
+        u = get_user(uid)
+        
+        try: history = json.loads(u["chat_history"] or "[]")
+        except: history = []
+        
+        history.append({"role": "user", "content": prompt})
+        if len(history) > MAX_HISTORY: history = history[-MAX_HISTORY:]
+            
         headers = {
             "Authorization": f"Bearer {OPENROUTER_KEY}",
             "Content-Type": "application/json",
             "HTTP-Referer": "https://t.me/plamenerualbot",
             "X-Title": "Neuro Studio"
         }
-        payload = {"model": mid, "messages": [{"role": "user", "content": prompt}]}
+        payload = {"model": mid, "messages": history}
         if "nemotron" in mid: payload["reasoning"] = {"enabled": True}
 
         try:
             r = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload, timeout=90)
             if r.status_code != 200:
-                try: err = r.json().get("error",{}).get("message", r.text[:200])
-                except: err = r.text[:200]
+                try: 
+                    err_data = r.json().get("error", {})
+                    err = err_data.get("message", r.text[:200])
+                    if "provider returned error" in err.lower():
+                        err = "Провайдер модели временно недоступен (лимит или сбой). Попробуй другую модель или подожди минуту."
+                except: 
+                    err = r.text[:200]
                 bot.edit_message_text(f"❌ Ошибка: {err}", uid, status.message_id)
                 return
             
             data = r.json()
             answer = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+            
+            if answer:
+                history.append({"role": "assistant", "content": answer})
+                upd(uid, chat_history=json.dumps(history))
+            
             try: bot.delete_message(uid, status.message_id)
             except: pass
             if not answer: return bot.send_message(uid, "❌ Нейросеть не дала ответ.")
+            
             if len(answer) > 4000:
                 for i in range(0, len(answer), 4000): bot.send_message(uid, answer[i:i+4000])
-            else: bot.send_message(uid, answer)
+            else: 
+                bot.send_message(uid, answer, reply_markup=chat_kb())
+                
         except Exception as e:
             try: bot.delete_message(uid, status.message_id)
             except: pass
-            bot.send_message(uid, "❌ Ошибка соединения.")
+            bot.send_message(uid, "❌ Ошибка соединения с нейросетью.")
         return
     # ========================================================================
 
@@ -751,7 +788,7 @@ def cb_give_start(c):
     uid = int(c.data.split("_")[2])
     kb = types.InlineKeyboardMarkup(row_width=2)
     for m_type, name in TYPE_NAMES.items():
-        if m_type != "text": # Текст теперь бесплатный
+        if m_type != "text": 
             kb.add(types.InlineKeyboardButton(name, callback_data=f"a_gtype_{m_type}_{uid}"))
     kb.add(types.InlineKeyboardButton("⬅️ Назад", callback_data=f"a_view_{uid}"))
     bot.edit_message_text("Что выдать?", c.message.chat.id, c.message.message_id, reply_markup=kb)
@@ -794,6 +831,9 @@ def cb_m_toggle(c):
     bot.answer_callback_query(c.id, "Изменено.", show_alert=True)
     admin_router(types.CallbackQuery(id="", from_user=c.from_user, data="admin_models", message=c.message))
 
+# ==========================================================
+# ЗАПУСК
+# ==========================================================
 if __name__ == "__main__":
-    log.info("🚀 Бот запущен (v22 ФИНАЛ)")
+    log.info("🚀 Бот запущен (v24 ФИНАЛ)")
     bot.infinity_polling(timeout=10, long_polling_timeout=5)
